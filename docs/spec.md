@@ -7,11 +7,18 @@
 
 ## プロジェクト概要
 
-> TODO: 確定したプロジェクト概要をここに記載する
+netkeiba からレース・馬・払い戻しデータをスクレイピングし、PostgreSQL に蓄積した上で競馬予想を行うシステム。
 
 ## 機能要件
 
-> TODO: 確定した機能要件をここに記載する
+- netkeiba のレースページから以下のデータを取得・保存する
+  - レース情報（日程・競馬場・距離・グレードなど）
+  - レース結果・出走馬情報（騎手・斤量・馬体重・オッズ・着順など）
+  - 馬マスタ（馬名・性別・生年月日・調教師など）
+  - 騎手マスタ（名前・所属・生年月日・初免許年）
+  - 調教師マスタ（名前・所属・生年月日・初免許年）
+  - 払い戻し（券種・組み合わせ・払い戻し金額）
+- 蓄積データを元に予想結果を出力する（アプローチは未定 → `plan.md` 参照）
 
 ## 非機能要件
 
@@ -19,11 +26,160 @@
 
 ## アーキテクチャ
 
-> TODO: 確定したアーキテクチャをここに記載する
+### モノレポ構成
+
+```
+furlong/
+├── docker-compose.yml   # PostgreSQL 起動設定
+├── .env.example         # 環境変数テンプレート
+├── scraper/             # netkeiba スクレイパー (Python)
+├── db/                  # テーブル定義 SQL
+│   └── schema/
+│       ├── 001_horses.sql
+│       ├── 002_races.sql
+│       ├── 003_race_entries.sql
+│       └── 004_payouts.sql
+└── predictor/           # 予想プログラム (Python)
+```
+
+### DB
+
+- **RDBMS**: PostgreSQL 16
+- **起動**: Docker (`docker-compose.yml`)
+- スキーマは `db/schema/` の SQL ファイルで管理し、Docker 起動時に自動実行される
 
 ## データ仕様
 
-> TODO: 確定したデータソース・データ形式をここに記載する
+### テーブル一覧
+
+| テーブル | 内容 | 件数（参考） |
+|---|---|---|
+| `horses` | 馬マスタ | 約 129,000件 |
+| `jockeys` | 騎手マスタ | 約 1,000件 |
+| `trainers` | 調教師マスタ | 約 1,100件 |
+| `races` | レースマスタ | 約 55,700件 |
+| `race_results` | レース結果・出走馬情報 | 約 790,000件 |
+| `payoffs` | 払い戻し | 約 587,600件 |
+
+### データ収録期間
+
+- **races.date**: 1995/01/05 〜 2025/12/28
+
+### テーブル定義
+
+#### `horses` — 馬マスタ
+
+| カラム | 型 | NOT NULL | 説明 |
+|---|---|---|---|
+| `horse_id` | varchar(20) | ✓ | **PK**。netkeiba の馬ID |
+| `horse_name` | varchar(100) | | 馬名 |
+| `sex` | varchar(10) | | 性別 |
+| `coat_color` | varchar(20) | | 毛色 |
+| `birthday` | varchar(20) | | 生年月日 |
+| `trainer_name` | varchar(50) | | 調教師名（非正規化） |
+| `trainer_id` | varchar(20) | | 調教師ID（`trainers.trainer_id` 参照） |
+| `owner` | varchar(100) | | 馬主名 |
+| `owner_id` | varchar(20) | | 馬主ID |
+| `breeder` | varchar(100) | | 生産者名 |
+| `birthplace` | varchar(50) | | 産地 |
+| `sire` | varchar(100) | | 父馬名 |
+| `dam` | varchar(100) | | 母馬名 |
+| `broodmare_sire` | varchar(100) | | 母父馬名 |
+| `raw_data` | text | | スクレイピング生データ（JSON） |
+| `created_at` | timestamp | ✓ | 作成日時 |
+| `updated_at` | timestamp | ✓ | 更新日時 |
+
+#### `jockeys` — 騎手マスタ
+
+| カラム | 型 | NOT NULL | 説明 |
+|---|---|---|---|
+| `jockey_id` | varchar(20) | ✓ | **PK**。netkeiba の騎手ID |
+| `jockey_name` | varchar(50) | | 騎手名 |
+| `affiliation` | varchar(50) | | 所属 |
+| `birthday` | varchar(20) | | 生年月日 |
+| `first_license_year` | varchar(10) | | 初免許年 |
+| `raw_data` | text | | スクレイピング生データ（JSON） |
+| `created_at` | timestamp | ✓ | 作成日時 |
+| `updated_at` | timestamp | ✓ | 更新日時 |
+
+#### `trainers` — 調教師マスタ
+
+| カラム | 型 | NOT NULL | 説明 |
+|---|---|---|---|
+| `trainer_id` | varchar(20) | ✓ | **PK**。netkeiba の調教師ID |
+| `trainer_name` | varchar(50) | | 調教師名 |
+| `affiliation` | varchar(50) | | 所属 |
+| `birthday` | varchar(20) | | 生年月日 |
+| `first_license_year` | varchar(10) | | 初免許年 |
+| `raw_data` | text | | スクレイピング生データ（JSON） |
+| `created_at` | timestamp | ✓ | 作成日時 |
+| `updated_at` | timestamp | ✓ | 更新日時 |
+
+#### `races` — レースマスタ
+
+| カラム | 型 | NOT NULL | 説明 |
+|---|---|---|---|
+| `race_id` | varchar(20) | ✓ | **PK**。12桁の数字文字列（例: `199505010201`） |
+| `race_name` | varchar(200) | | レース名 |
+| `race_number` | varchar(5) | | レース番号（R番号） |
+| `date` | varchar(20) | | 開催日（フォーマット: `YYYY/MM/DD`） |
+| `venue` | varchar(50) | | 競馬場名（例: 東京、阪神） |
+| `course_type` | varchar(20) | | コース種別（芝／ダート） |
+| `distance` | integer | | 距離（m） |
+| `direction` | varchar(10) | | 回り（左／右） |
+| `weather` | varchar(20) | | 天候 |
+| `track_condition` | varchar(20) | | 馬場状態（良／稍重／重／不良） |
+| `grade` | varchar(20) | | グレード（G1/G2/G3 など） |
+| `start_time` | varchar(10) | | 発走時刻 |
+| `head_count` | integer | | 出走頭数 |
+| `raw_data` | text | | スクレイピング生データ（JSON） |
+| `created_at` | timestamp | ✓ | 作成日時 |
+| `updated_at` | timestamp | ✓ | 更新日時 |
+
+#### `race_results` — レース結果・出走馬情報
+
+| カラム | 型 | NOT NULL | 説明 |
+|---|---|---|---|
+| `race_id` | varchar(20) | ✓ | **PK(1/2)**。`races.race_id` 参照 |
+| `horse_number` | varchar(5) | ✓ | **PK(2/2)**。馬番 |
+| `finishing_position` | varchar(10) | | 着順 |
+| `bracket_number` | varchar(5) | | 枠番 |
+| `horse_name` | varchar(100) | | 馬名（非正規化） |
+| `horse_id` | varchar(20) | | 馬ID（`horses.horse_id` 参照）。インデックスあり |
+| `sex_age` | varchar(10) | | 性齢（例: `牝4`） |
+| `weight_carried` | varchar(10) | | 斤量 |
+| `jockey_name` | varchar(50) | | 騎手名（非正規化） |
+| `jockey_id` | varchar(20) | | 騎手ID（`jockeys.jockey_id` 参照）。インデックスあり |
+| `finish_time` | varchar(20) | | タイム（例: `1:51.4`） |
+| `margin` | varchar(20) | | 着差（例: `クビ`、`3`） |
+| `passing_order` | varchar(20) | | 通過順位（例: `6-7-11-12`） |
+| `last_3f` | varchar(10) | | 上がり3ハロン（秒） |
+| `odds` | varchar(10) | | 単勝オッズ |
+| `popularity` | varchar(10) | | 人気順 |
+| `horse_weight` | integer | | 馬体重（kg） |
+| `horse_weight_diff` | integer | | 馬体重増減（kg） |
+| `trainer_name` | varchar(50) | | 調教師名（非正規化） |
+| `trainer_id` | varchar(20) | | 調教師ID（`trainers.trainer_id` 参照）。インデックスあり |
+| `owner` | varchar(100) | | 馬主名 |
+| `prize_money` | varchar(20) | | 賞金 |
+| `raw_data` | text | | スクレイピング生データ（JSON） |
+| `created_at` | timestamp | ✓ | 作成日時 |
+
+#### `payoffs` — 払い戻し
+
+| カラム | 型 | NOT NULL | 説明 |
+|---|---|---|---|
+| `id` | integer | ✓ | **PK**（serial） |
+| `race_id` | varchar(20) | ✓ | `races.race_id` 参照。インデックスあり |
+| `bet_type` | varchar(20) | | 券種（単勝・複勝・枠連・馬連・馬単・ワイド・三連複・三連単） |
+| `combination` | varchar(100) | | 組み合わせ（例: `16`、`3-7`） |
+| `payout` | varchar(50) | | 払い戻し金額（例: `1,310`） |
+| `popularity` | varchar(20) | | 人気 |
+| `created_at` | timestamp | ✓ | 作成日時 |
+
+### データソース
+
+- **netkeiba** (スクレイピング)
 
 ## 入出力仕様
 
