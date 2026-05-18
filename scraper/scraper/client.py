@@ -41,6 +41,11 @@ class NetkeibaClient:
         url = f"{_BASE_URL}/race/{race_id}/"
         return self._get(url)
 
+    def get_horse(self, horse_id: str) -> str:
+        """馬詳細ページを取得してHTMLを返す."""
+        url = f"{_BASE_URL}/horse/{horse_id}/"
+        return self._get(url)
+
     def _get(self, url: str) -> str:
         """レートリミット・リトライ付きHTTP GETリクエスト."""
         last_exc: Exception | None = None

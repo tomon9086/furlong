@@ -51,3 +51,53 @@ class PayoffRow(TypedDict, total=False):
     組番: str
     払戻金: str
     人気: str
+
+
+class HorseProfile(TypedDict, total=False):
+    """馬プロフィール情報."""
+
+    馬名: str
+    性別: str
+    毛色: str
+    生年月日: str
+    調教師: str
+    調教師ID: str
+    馬主: str
+    馬主ID: str
+    生産者: str
+    産地: str
+    セリ名: str
+    獲得賞金: str
+    通算成績: str
+    主な勝鞍: str
+    父: str
+    母: str
+    母父: str
+
+
+class HorseRaceResult(TypedDict, total=False):
+    """馬の競走成績の1行."""
+
+    日付: str
+    開催: str
+    天気: str
+    R: str
+    レース名: str
+    頭数: str
+    枠: str
+    馬番: str
+    オッズ: str
+    人気: str
+    着順: str
+    騎手: str
+    斤量: str
+    コース: str
+    馬場: str
+    タイム: str
+    着差: str
+    通過: str
+    上り: str
+    馬体重: str
+    賞金: str
+    レースID: str
+    騎手ID: str
