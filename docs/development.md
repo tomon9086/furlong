@@ -24,15 +24,54 @@
 
 ## 環境構築
 
-> TODO: セットアップ手順をここに記載する
+### 前提
+
+- Docker / Docker Compose
+- Python 3.11+
+
+### 手順
+
+```bash
+# 1. 環境変数ファイルを作成
+cp .env.example .env
+
+# 2. PostgreSQL を起動
+docker compose up -d
+
+# 3. 各プロジェクトの依存をインストール（例: scraper）
+cd scraper
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
 
 ## 開発サーバー起動
 
-> TODO: 起動コマンドをここに記載する
+### PostgreSQL
+
+```bash
+# 起動
+docker compose up -d
+
+# 停止
+docker compose down
+
+# ログ確認
+docker compose logs -f db
+
+# psql で接続
+docker compose exec db psql -U furlong -d furlong
+```
 
 ## テスト
 
-> TODO: テスト実行手順をここに記載する
+```bash
+# scraper
+cd scraper && pytest
+
+# predictor
+cd predictor && pytest
+```
 
 ## ビルド・デプロイ
 
