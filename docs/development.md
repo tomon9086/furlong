@@ -47,8 +47,8 @@ docker compose up -d
 # 3. 全パッケージの依存をインストール（ルートで実行）
 uv sync
 
-# dev 依存も含める場合
-uv sync --extra dev
+# dev 依存も含める場合（全パッケージの extras を含む）
+uv sync --all-extras
 ```
 
 本プロジェクトは uv ワークスペース構成（`pyproject.toml` 参照）。
@@ -70,6 +70,16 @@ docker compose logs -f db
 
 # psql で接続
 docker compose exec db psql -U furlong -d furlong
+```
+
+## プログラム実行
+
+```bash
+# scraper
+uv run --package furlong-scraper python -m scraper.main
+
+# predictor
+uv run --package furlong-predictor python -m predictor.main
 ```
 
 ## テスト
