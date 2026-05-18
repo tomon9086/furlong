@@ -37,11 +37,7 @@ furlong/
 ├── .env.example         # 環境変数テンプレート
 ├── scraper/             # netkeiba スクレイパー (Python)
 ├── db/                  # テーブル定義 SQL
-│   └── schema/
-│       ├── 001_horses.sql
-│       ├── 002_races.sql
-│       ├── 003_race_entries.sql
-│       └── 004_payouts.sql
+│   └── schema.sql       # 全テーブル定義（sqldef で管理）
 └── predictor/           # 予想プログラム (Python)
 ```
 
@@ -49,7 +45,9 @@ furlong/
 
 - **RDBMS**: PostgreSQL 16
 - **起動**: Docker (`docker-compose.yml`)
-- スキーマは `db/schema/` の SQL ファイルで管理し、Docker 起動時に自動実行される
+- スキーマは `db/schema.sql` で管理し、[psqldef](https://github.com/sqldef/sqldef) で冪等適用する
+  - Docker 起動時: `docker-entrypoint-initdb.d` 経由で自動実行（初回のみ）
+  - スキーマ変更時: `psqldef -U $POSTGRES_USER -h localhost $POSTGRES_DB < db/schema.sql`
 
 ## データ仕様
 
