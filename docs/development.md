@@ -28,6 +28,12 @@
 
 - Docker / Docker Compose
 - Python 3.11+
+- [uv](https://docs.astral.sh/uv/) — Python パッケージ・プロジェクト管理ツール
+
+```bash
+# uv のインストール（未インストールの場合）
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
 
 ### 手順
 
@@ -38,12 +44,15 @@ cp .env.example .env
 # 2. PostgreSQL を起動
 docker compose up -d
 
-# 3. 各プロジェクトの依存をインストール（例: scraper）
-cd scraper
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+# 3. 全パッケージの依存をインストール（ルートで実行）
+uv sync
+
+# dev 依存も含める場合
+uv sync --extra dev
 ```
+
+本プロジェクトは uv ワークスペース構成（`pyproject.toml` 参照）。
+`.venv` はルートに一つ作成され、全パッケージが共有する。
 
 ## 開発サーバー起動
 
@@ -66,11 +75,12 @@ docker compose exec db psql -U furlong -d furlong
 ## テスト
 
 ```bash
-# scraper
-cd scraper && pytest
+# 全パッケージ
+uv run --package furlong-scraper pytest scraper
+uv run --package furlong-predictor pytest predictor
 
-# predictor
-cd predictor && pytest
+# 特定パッケージのみ（例: scraper）
+uv run --package furlong-scraper pytest
 ```
 
 ## ビルド・デプロイ
