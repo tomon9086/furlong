@@ -186,4 +186,63 @@ furlong/
 
 ## 入出力仕様
 
-> TODO: 確定した入出力仕様をここに記載する
+### scraper
+
+#### 入力
+
+| 項目 | 内容 |
+|---|---|
+| スクレイピング対象 URL | `https://db.netkeiba.com/race/{race_id}/` など netkeiba の各ページ |
+| `race_id` | 12桁数字文字列（例: `199505010201`） |
+| 環境変数 `DATABASE_URL` | 接続先 PostgreSQL の DSN |
+
+#### 出力
+
+| 項目 | 内容 |
+|---|---|
+| DB 保存先 | `races`, `race_results`, `horses`, `jockeys`, `trainers`, `payoffs` テーブル |
+| Upsert 方式 | 主キーが衝突した場合は上書き更新（`ON CONFLICT DO UPDATE`） |
+
+---
+
+### predictor
+
+#### 入力
+
+| 項目 | 内容 |
+|---|---|
+| `race_id` | 予測対象レースの ID（CLI 引数または環境変数） |
+| 環境変数 `DATABASE_URL` | 接続先 PostgreSQL の DSN |
+| モデルファイル | 学習済みモデル（`predictor/models/model.pkl`） |
+
+学習フェーズでは DB から以下の特徴量を取得する：
+
+| カテゴリ | 特徴量（カラム） |
+|---|---|
+| レース条件 | `distance`, `course_type`, `direction`, `track_condition`, `grade` |
+| 出走馬 | `sex_age`, `weight_carried`, `horse_weight`, `horse_weight_diff` |
+| 市場評価 | `odds`, `popularity` |
+| 近走成績 | 過去N走の `finishing_position`, `last_3f`, `passing_order` |
+| 血統 | `sire`, `dam`, `broodmare_sire` |
+
+#### 出力
+
+標準出力（テキスト形式）および CSV ファイル（`output/prediction_{race_id}.csv`）。
+
+| カラム | 内容 |
+|---|---|
+| `horse_number` | 馬番 |
+| `horse_name` | 馬名 |
+| `win_prob` | 単勝確率（0〜1） |
+| `place_prob` | 複勝確率（0〜1、3着以内） |
+| `predicted_rank` | 予測着順 |
+| `recommended` | 推奨買い目フラグ（`true`/`false`） |
+
+推奨買い目の基準：
+
+| 券種 | 推奨基準 |
+|---|---|
+| 単勝 | `win_prob` 上位1頭 |
+| 複勝 | `place_prob` 上位3頭 |
+| 馬連・馬単 | `predicted_rank` 1・2位の組み合わせ |
+| 三連複・三連単 | `predicted_rank` 1〜3位の組み合わせ |
