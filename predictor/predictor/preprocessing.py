@@ -171,11 +171,15 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
         return group
 
     # 全レース共通: 直近3走・直近5走
+    # pandas 3.0 では groupby キー列がグループから除外されるため、事前に保存して復元する
+    _horse_id = df["horse_id"].copy()
     df = df.groupby("horse_id", group_keys=False).apply(
         lambda g: _add_rolling(_add_rolling(g, 3, ""), 5, "")
     )
+    df["horse_id"] = _horse_id
 
     # 同コース種別・同距離: 直近3走・直近5走
+    _cond_keys = df[["horse_id", "course_type", "distance"]].copy()
     df = df.groupby(
         ["horse_id", "course_type", "distance"],
         group_keys=False,
@@ -183,6 +187,8 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
     ).apply(
         lambda g: _add_rolling(_add_rolling(g, 3, "_cond"), 5, "_cond")
     )
+    for col in ["horse_id", "course_type", "distance"]:
+        df[col] = _cond_keys[col]
 
     return df
 
