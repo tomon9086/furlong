@@ -26,9 +26,11 @@ SELECT
     rr.finishing_position,
     rr.bracket_number,
     rr.horse_id,
+    rr.horse_name,
     rr.sex_age,
     rr.weight_carried,
     rr.jockey_id,
+    rr.jockey_name,
     rr.finish_time,
     rr.passing_order,
     rr.last_3f,
@@ -142,6 +144,49 @@ def preprocess(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
+    """近走成績フィーチャーを pandas rolling で集計する（学習時）。
+
+    情報リークを防ぐため当該レース自身を集計から除外する（shift(1)）。
+    """
+    df = df.copy()
+
+    def _add_rolling(group: pd.DataFrame, n: int, suffix: str) -> pd.DataFrame:
+        group = group.sort_values(["date", "race_id"]).copy()
+        pos = group["finishing_position"].astype(float)
+        last3f = group["last_3f"].astype(float)
+
+        s_pos = pos.shift(1)
+        s_last3f = last3f.shift(1)
+
+        group[f"avg_finish_last{n}{suffix}"] = (
+            s_pos.rolling(n, min_periods=1).mean().values
+        )
+        group[f"best_finish_last{n}{suffix}"] = (
+            s_pos.rolling(n, min_periods=1).min().values
+        )
+        group[f"avg_last3f_last{n}{suffix}"] = (
+            s_last3f.rolling(n, min_periods=1).mean().values
+        )
+        return group
+
+    # 全レース共通: 直近3走・直近5走
+    df = df.groupby("horse_id", group_keys=False).apply(
+        lambda g: _add_rolling(_add_rolling(g, 3, ""), 5, "")
+    )
+
+    # 同コース種別・同距離: 直近3走・直近5走
+    df = df.groupby(
+        ["horse_id", "course_type", "distance"],
+        group_keys=False,
+        observed=True,
+    ).apply(
+        lambda g: _add_rolling(_add_rolling(g, 3, "_cond"), 5, "_cond")
+    )
+
+    return df
+
+
 def get_feature_columns() -> list[str]:
     """学習・推論に使う特徴量カラム名の一覧を返す。"""
     return [
@@ -165,6 +210,22 @@ def get_feature_columns() -> list[str]:
         # 市場評価
         "odds",
         "popularity",
+        # 近走成績（全レース・直近3走）
+        "avg_finish_last3",
+        "best_finish_last3",
+        "avg_last3f_last3",
+        # 近走成績（全レース・直近5走）
+        "avg_finish_last5",
+        "best_finish_last5",
+        "avg_last3f_last5",
+        # 近走成績（同コース種別・同距離・直近3走）
+        "avg_finish_last3_cond",
+        "best_finish_last3_cond",
+        "avg_last3f_last3_cond",
+        # 近走成績（同コース種別・同距離・直近5走）
+        "avg_finish_last5_cond",
+        "best_finish_last5_cond",
+        "avg_last3f_last5_cond",
         # 血統
         "sire",
         "dam",
@@ -172,10 +233,6 @@ def get_feature_columns() -> list[str]:
         # 騎手・調教師
         "jockey_id",
         "trainer_id",
-        # レースパフォーマンス（学習時のみ利用可）
-        "last_3f",
-        "finish_time_sec",
-        "first_corner_pos",
     ]
 
 
