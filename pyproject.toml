@@ -1,2 +1,7 @@
 [tool.uv.workspace]
 members = ["scraper", "predictor", "repository"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]

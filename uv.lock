@@ -17,6 +17,9 @@ members = [
     "furlong-scraper",
 ]
 
+[manifest.dependency-groups]
+dev = [{ name = "pytest", specifier = ">=8.0" }]
+
 [[package]]
 name = "anyio"
 version = "4.13.0"
