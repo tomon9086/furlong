@@ -4,10 +4,13 @@ version = "0.1.0"
 description = "競馬予想プログラム"
 requires-python = ">=3.11"
 dependencies = [
-    "psycopg[binary]>=3.1",
     "pandas>=2.2",
     "python-dotenv>=1.0",
+    "furlong-repository",
 ]
+
+[tool.uv.sources]
+furlong-repository = { workspace = true }
 
 [project.optional-dependencies]
 dev = [
