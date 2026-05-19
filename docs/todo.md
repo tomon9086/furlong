@@ -21,14 +21,14 @@
 
 ### repository パッケージ導入
 
-- [ ] `repository/` ディレクトリと `pyproject.toml` を作成（name = "furlong-repository"）
-- [ ] `scraper/types.py` → `repository/repository/models.py` へ移動
-- [ ] `scraper/database.py` → `repository/repository/database.py` へ移動
-- [ ] ルート `pyproject.toml` の `[tool.uv.workspace].members` に `"repository"` を追加
-- [ ] `scraper/pyproject.toml` に `furlong-repository = { workspace = true }` を追加し、`psycopg` 依存を削除
-- [ ] `predictor/pyproject.toml` に `furlong-repository = { workspace = true }` を追加し、`psycopg` 依存を削除
-- [ ] `scraper` 内の import を `repository.models` / `repository.database` に更新
-- [ ] `uv sync` で依存関係を再解決・動作確認
+- [x] `repository/` ディレクトリと `pyproject.toml` を作成（name = "furlong-repository"）
+- [x] `scraper/types.py` → `repository/repository/models.py` へ移動
+- [x] `scraper/database.py` → `repository/repository/database.py` へ移動
+- [x] ルート `pyproject.toml` の `[tool.uv.workspace].members` に `"repository"` を追加
+- [x] `scraper/pyproject.toml` に `furlong-repository = { workspace = true }` を追加し、`psycopg` 依存を削除
+- [x] `predictor/pyproject.toml` に `furlong-repository = { workspace = true }` を追加し、`psycopg` 依存を削除
+- [x] `scraper` 内の import を `repository.models` / `repository.database` に更新
+- [x] `uv sync` で依存関係を再解決・動作確認
 
 ## テスト
 
