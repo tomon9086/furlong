@@ -49,6 +49,76 @@
 - 的中率
 - ランキング精度（NDCG など）
 
+## 近走成績フィーチャーの実装方針（確定）
+
+### 決定事項（2026-05-19）
+
+- **集計ウィンドウ**: 直近3走 + 直近5走の2セット
+- **条件フィルタ**: 全レース共通 + 同コース種別・同距離の両方を特徴量化
+- **実装方式**: フェーズによって使い分ける
+  - **学習時**: 全件ロード後に pandas rolling で集計（案B）
+    - どちらも79万行転送が必要で差がないため、Python で完結する案Bが保守しやすい
+  - **予測時（特定レース）**: SQL ウィンドウ関数 + `WHERE horse_id IN (...)` で対象馬のみ取得（案A）
+    - 79万行 → 数十〜百行に削減でき、パフォーマンスが有意に向上する
+
+→ 確定仕様は `spec.md` に記載。
+
+### SQL 設計メモ（予測時用）
+
+リーク防止のため `ROWS BETWEEN N PRECEDING AND 1 PRECEDING` を使い、当該レース自身を集計から除外する。
+同日に複数レースがある場合の順序安定化のため `ORDER BY race_date, race_id` とする。
+`last_3f` が数値以外（`'-'` など）の場合は NULL に変換して集計から除外する。
+
+```sql
+WITH base AS (
+  SELECT
+    rr.race_id,
+    rr.horse_id,
+    TO_DATE(r.date, 'YYYY/MM/DD') AS race_date,
+    r.course_type,
+    r.distance,
+    rr.finishing_position::integer AS finishing_pos,
+    CASE WHEN rr.last_3f ~ '^\d+\.?\d*$' THEN rr.last_3f::float ELSE NULL END AS last_3f_num
+  FROM race_results rr
+  JOIN races r ON rr.race_id = r.race_id
+  WHERE rr.finishing_position ~ '^[0-9]+$'
+)
+SELECT
+  race_id,
+  horse_id,
+  -- 全レース 直近3走
+  AVG(finishing_pos) OVER (PARTITION BY horse_id
+    ORDER BY race_date, race_id ROWS BETWEEN 3 PRECEDING AND 1 PRECEDING) AS avg_finish_last3,
+  MIN(finishing_pos) OVER (PARTITION BY horse_id
+    ORDER BY race_date, race_id ROWS BETWEEN 3 PRECEDING AND 1 PRECEDING) AS best_finish_last3,
+  AVG(last_3f_num)   OVER (PARTITION BY horse_id
+    ORDER BY race_date, race_id ROWS BETWEEN 3 PRECEDING AND 1 PRECEDING) AS avg_last3f_last3,
+  -- 全レース 直近5走
+  AVG(finishing_pos) OVER (PARTITION BY horse_id
+    ORDER BY race_date, race_id ROWS BETWEEN 5 PRECEDING AND 1 PRECEDING) AS avg_finish_last5,
+  MIN(finishing_pos) OVER (PARTITION BY horse_id
+    ORDER BY race_date, race_id ROWS BETWEEN 5 PRECEDING AND 1 PRECEDING) AS best_finish_last5,
+  AVG(last_3f_num)   OVER (PARTITION BY horse_id
+    ORDER BY race_date, race_id ROWS BETWEEN 5 PRECEDING AND 1 PRECEDING) AS avg_last3f_last5,
+  -- 条件別 直近3走
+  AVG(finishing_pos) OVER (PARTITION BY horse_id, course_type, distance
+    ORDER BY race_date, race_id ROWS BETWEEN 3 PRECEDING AND 1 PRECEDING) AS avg_finish_last3_cond,
+  MIN(finishing_pos) OVER (PARTITION BY horse_id, course_type, distance
+    ORDER BY race_date, race_id ROWS BETWEEN 3 PRECEDING AND 1 PRECEDING) AS best_finish_last3_cond,
+  AVG(last_3f_num)   OVER (PARTITION BY horse_id, course_type, distance
+    ORDER BY race_date, race_id ROWS BETWEEN 3 PRECEDING AND 1 PRECEDING) AS avg_last3f_last3_cond,
+  -- 条件別 直近5走
+  AVG(finishing_pos) OVER (PARTITION BY horse_id, course_type, distance
+    ORDER BY race_date, race_id ROWS BETWEEN 5 PRECEDING AND 1 PRECEDING) AS avg_finish_last5_cond,
+  MIN(finishing_pos) OVER (PARTITION BY horse_id, course_type, distance
+    ORDER BY race_date, race_id ROWS BETWEEN 5 PRECEDING AND 1 PRECEDING) AS best_finish_last5_cond,
+  AVG(last_3f_num)   OVER (PARTITION BY horse_id, course_type, distance
+    ORDER BY race_date, race_id ROWS BETWEEN 5 PRECEDING AND 1 PRECEDING) AS avg_last3f_last5_cond
+FROM base
+```
+
+---
+
 ## アイデア・メモ
 
 ### DB スキーマ調査メモ（2026-05-18）

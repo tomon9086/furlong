@@ -213,15 +213,24 @@ furlong/
 | 環境変数 `DATABASE_URL` | 接続先 PostgreSQL の DSN |
 | モデルファイル | 学習済みモデル（`predictor/models/model.pkl`） |
 
+近走成績フィーチャーの取得方式はフェーズによって異なる：
+
+- **学習時**: 全件ロード後に pandas rolling で集計（全データを1クエリで取得）
+- **予測時**: SQL ウィンドウ関数 + `WHERE horse_id IN (対象馬)` で対象レースの馬のみ取得
+
 学習フェーズでは DB から以下の特徴量を取得する：
 
 | カテゴリ | 特徴量（カラム） |
 |---|---|
-| レース条件 | `distance`, `course_type`, `direction`, `track_condition`, `grade` |
-| 出走馬 | `sex_age`, `weight_carried`, `horse_weight`, `horse_weight_diff` |
+| レース条件 | `venue`, `course_type`, `distance`, `direction`, `weather`, `track_condition`, `grade`, `head_count` |
+| 出走馬 | `horse_number`, `bracket_number`, `sex`（`sex_age` より分離）, `age`（同）, `weight_carried`, `horse_weight`, `horse_weight_diff` |
 | 市場評価 | `odds`, `popularity` |
-| 近走成績 | 過去N走の `finishing_position`, `last_3f`, `passing_order` |
+| 近走成績（全レース・直近3走） | `avg_finish_last3`, `best_finish_last3`, `avg_last3f_last3` |
+| 近走成績（全レース・直近5走） | `avg_finish_last5`, `best_finish_last5`, `avg_last3f_last5` |
+| 近走成績（同コース種別・同距離・直近3走） | `avg_finish_last3_cond`, `best_finish_last3_cond`, `avg_last3f_last3_cond` |
+| 近走成績（同コース種別・同距離・直近5走） | `avg_finish_last5_cond`, `best_finish_last5_cond`, `avg_last3f_last5_cond` |
 | 血統 | `sire`, `dam`, `broodmare_sire` |
+| 騎手・調教師 | `jockey_id`, `trainer_id` |
 
 #### 出力
 
