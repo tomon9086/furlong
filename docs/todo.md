@@ -7,9 +7,10 @@
 
 ### #1 未使用特徴量の追加
 
-- [ ] `preprocessing.py` の `get_feature_columns()` に `finish_time_sec` を追加
-- [ ] `preprocessing.py` の `get_feature_columns()` に `first_corner_pos` を追加
-- [ ] 追加後に `uv run python -m predictor.main train` で再学習・評価指標を比較
+- [x] `preprocessing.py` の `get_feature_columns()` に `finish_time_sec` を追加
+- [x] `preprocessing.py` の `get_feature_columns()` に `first_corner_pos` を追加
+- [x] 追加後に `uv run python -m predictor.main train` で再学習・評価指標を比較
+  - win_accuracy: 0.3487 / recovery_rate: **1.0848** / win_logloss: 0.2028 / place_logloss: 0.3773
 
 ### #2 win_prob のレース内正規化
 
