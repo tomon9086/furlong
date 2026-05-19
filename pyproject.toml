@@ -1,2 +1,2 @@
 [tool.uv.workspace]
-members = ["scraper", "predictor"]
+members = ["scraper", "predictor", "repository"]

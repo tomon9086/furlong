@@ -13,6 +13,7 @@ resolution-markers = [
 [manifest]
 members = [
     "furlong-predictor",
+    "furlong-repository",
     "furlong-scraper",
 ]
 
@@ -65,8 +66,8 @@ name = "furlong-predictor"
 version = "0.1.0"
 source = { editable = "predictor" }
 dependencies = [
+    { name = "furlong-repository" },
     { name = "pandas" },
-    { name = "psycopg", extra = ["binary"] },
     { name = "python-dotenv" },
 ]
 
@@ -82,9 +83,9 @@ ml = [
 
 [package.metadata]
 requires-dist = [
+    { name = "furlong-repository", editable = "repository" },
     { name = "lightgbm", marker = "extra == 'ml'", specifier = ">=4.3" },
     { name = "pandas", specifier = ">=2.2" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
@@ -93,13 +94,35 @@ requires-dist = [
 provides-extras = ["dev", "ml"]
 
 [[package]]
+name = "furlong-repository"
+version = "0.1.0"
+source = { editable = "repository" }
+dependencies = [
+    { name = "psycopg", extra = ["binary"] },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.1" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "furlong-scraper"
 version = "0.1.0"
 source = { editable = "scraper" }
 dependencies = [
     { name = "beautifulsoup4" },
+    { name = "furlong-repository" },
     { name = "httpx" },
-    { name = "psycopg", extra = ["binary"] },
     { name = "python-dotenv" },
 ]
 
@@ -112,8 +135,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.12" },
+    { name = "furlong-repository", editable = "repository" },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
