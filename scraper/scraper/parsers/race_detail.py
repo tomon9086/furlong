@@ -4,7 +4,7 @@ import logging
 import re
 
 from .base import BaseParser
-from ..types import PayoffRow, RaceDetailRow, RaceInfo
+from repository.models import PayoffRow, RaceDetailRow, RaceInfo
 
 logger = logging.getLogger(__name__)
 

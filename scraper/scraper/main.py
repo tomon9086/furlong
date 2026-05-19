@@ -7,7 +7,7 @@ import sys
 from dotenv import load_dotenv
 
 from .client import NetkeibaClient
-from .database import Database
+from repository import Database
 from .parsers import HorseParser, RaceDetailParser
 
 load_dotenv()

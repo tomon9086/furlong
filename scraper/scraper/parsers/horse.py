@@ -3,7 +3,7 @@
 import logging
 import re
 
-from ..types import HorseProfile, HorseRaceResult
+from repository.models import HorseProfile, HorseRaceResult
 from .base import BaseParser
 
 logger = logging.getLogger(__name__)
