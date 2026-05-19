@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pickle
+from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -57,20 +58,34 @@ def train(train_df: pd.DataFrame) -> Models:
     return Models(win=win_model, place=place_model)
 
 
-def save_models(models: Models, model_dir: Path = _MODEL_DIR) -> None:
-    """モデルをファイルに保存する。"""
-    model_dir.mkdir(parents=True, exist_ok=True)
-    with open(model_dir / "win_model.pkl", "wb") as f:
+def save_models(
+    models: Models,
+    metrics: dict | None = None,
+    model_dir: Path = _MODEL_DIR,
+) -> Path:
+    """モデルをタイムスタンプ付きディレクトリに保存する。"""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    version_dir = model_dir / timestamp
+    version_dir.mkdir(parents=True, exist_ok=True)
+
+    with open(version_dir / "win_model.pkl", "wb") as f:
         pickle.dump(models.win, f)
-    with open(model_dir / "place_model.pkl", "wb") as f:
+    with open(version_dir / "place_model.pkl", "wb") as f:
         pickle.dump(models.place, f)
+
+    return version_dir
 
 
 def load_models(model_dir: Path = _MODEL_DIR) -> Models:
-    """保存済みモデルを読み込む。"""
-    with open(model_dir / "win_model.pkl", "rb") as f:
+    """保存済みモデルを読み込む（最新のタイムスタンプディレクトリを使用）。"""
+    dirs = sorted(d for d in model_dir.iterdir() if d.is_dir())
+    if not dirs:
+        raise FileNotFoundError(f"モデルが見つかりません: {model_dir}")
+    version_dir = dirs[-1]
+
+    with open(version_dir / "win_model.pkl", "rb") as f:
         win = pickle.load(f)
-    with open(model_dir / "place_model.pkl", "rb") as f:
+    with open(version_dir / "place_model.pkl", "rb") as f:
         place = pickle.load(f)
     return Models(win=win, place=place)
 

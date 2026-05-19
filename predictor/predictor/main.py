@@ -44,8 +44,8 @@ def train_mode() -> None:
         print(f"  {k}: {v:.4f}")
 
     print("モデルを保存中...")
-    model.save_models(models)
-    print("完了")
+    version_dir = model.save_models(models)
+    print(f"完了 ({version_dir.name})")
 
 
 def predict_mode(race_id: str) -> None:
