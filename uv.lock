@@ -67,8 +67,10 @@ version = "0.1.0"
 source = { editable = "predictor" }
 dependencies = [
     { name = "furlong-repository" },
+    { name = "lightgbm" },
     { name = "pandas" },
     { name = "python-dotenv" },
+    { name = "scikit-learn" },
 ]
 
 [package.optional-dependencies]
@@ -76,22 +78,18 @@ dev = [
     { name = "pytest" },
     { name = "ruff" },
 ]
-ml = [
-    { name = "lightgbm" },
-    { name = "scikit-learn" },
-]
 
 [package.metadata]
 requires-dist = [
     { name = "furlong-repository", editable = "repository" },
-    { name = "lightgbm", marker = "extra == 'ml'", specifier = ">=4.3" },
+    { name = "lightgbm", specifier = ">=4.3" },
     { name = "pandas", specifier = ">=2.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
-    { name = "scikit-learn", marker = "extra == 'ml'", specifier = ">=1.4" },
+    { name = "scikit-learn", specifier = ">=1.4" },
 ]
-provides-extras = ["dev", "ml"]
+provides-extras = ["dev"]
 
 [[package]]
 name = "furlong-repository"
