@@ -145,50 +145,71 @@ def preprocess(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
-    """近走成績フィーチャーを pandas rolling で集計する（学習時）。
+    """近走成績フィーチャーを集計する（学習時）。
 
     情報リークを防ぐため当該レース自身を集計から除外する（shift(1)）。
+    groupby().rolling() を使って高速化している（apply による Python ループを排除）。
     """
     df = df.copy()
+    df["finishing_position"] = df["finishing_position"].astype(float)
+    df["last_3f"] = df["last_3f"].astype(float)
 
-    def _add_rolling(group: pd.DataFrame, n: int, suffix: str) -> pd.DataFrame:
-        group = group.sort_values(["date", "race_id"]).copy()
-        pos = group["finishing_position"].astype(float)
-        last3f = group["last_3f"].astype(float)
+    # ── 全レース共通: 直近3走・直近5走 ─────────────────────────────────────
+    # 日付順に1回だけソートし、groupby().rolling() が各馬内で時系列順に動作するようにする
+    df = df.sort_values(["horse_id", "date", "race_id"]).reset_index(drop=True)
 
-        s_pos = pos.shift(1)
-        s_last3f = last3f.shift(1)
+    # 当該レースを除くため1つシフト（group 境界を超えない）
+    df["_pos_s"] = df.groupby("horse_id", observed=True)["finishing_position"].shift(1)
+    df["_last3f_s"] = df.groupby("horse_id", observed=True)["last_3f"].shift(1)
 
-        group[f"avg_finish_last{n}{suffix}"] = (
-            s_pos.rolling(n, min_periods=1).mean().values
+    for n, suffix in [(3, ""), (5, "")]:
+        grp = df.groupby("horse_id", observed=True, sort=False)
+        df[f"avg_finish_last{n}{suffix}"] = (
+            grp["_pos_s"].rolling(n, min_periods=1).mean()
+            .reset_index(level=0, drop=True)
         )
-        group[f"best_finish_last{n}{suffix}"] = (
-            s_pos.rolling(n, min_periods=1).min().values
+        df[f"best_finish_last{n}{suffix}"] = (
+            grp["_pos_s"].rolling(n, min_periods=1).min()
+            .reset_index(level=0, drop=True)
         )
-        group[f"avg_last3f_last{n}{suffix}"] = (
-            s_last3f.rolling(n, min_periods=1).mean().values
+        df[f"avg_last3f_last{n}{suffix}"] = (
+            grp["_last3f_s"].rolling(n, min_periods=1).mean()
+            .reset_index(level=0, drop=True)
         )
-        return group
 
-    # 全レース共通: 直近3走・直近5走
-    # pandas 3.0 では groupby キー列がグループから除外されるため、事前に保存して復元する
-    _horse_id = df["horse_id"].copy()
-    df = df.groupby("horse_id", group_keys=False).apply(
-        lambda g: _add_rolling(_add_rolling(g, 3, ""), 5, "")
+    df = df.drop(columns=["_pos_s", "_last3f_s"])
+
+    # ── 同コース種別・同距離: 直近3走・直近5走 ──────────────────────────────
+    cond_key = ["horse_id", "course_type", "distance"]
+    df_cond = df.sort_values(cond_key + ["date", "race_id"])
+
+    df_cond = df_cond.assign(
+        _pos_s_c=df_cond.groupby(cond_key, observed=True)["finishing_position"].shift(1),
+        _last3f_s_c=df_cond.groupby(cond_key, observed=True)["last_3f"].shift(1),
     )
-    df["horse_id"] = _horse_id
 
-    # 同コース種別・同距離: 直近3走・直近5走
-    _cond_keys = df[["horse_id", "course_type", "distance"]].copy()
-    df = df.groupby(
-        ["horse_id", "course_type", "distance"],
-        group_keys=False,
-        observed=True,
-    ).apply(
-        lambda g: _add_rolling(_add_rolling(g, 3, "_cond"), 5, "_cond")
-    )
-    for col in ["horse_id", "course_type", "distance"]:
-        df[col] = _cond_keys[col]
+    for n, suffix in [(3, "_cond"), (5, "_cond")]:
+        grp_c = df_cond.groupby(cond_key, observed=True, sort=False)
+        df_cond[f"avg_finish_last{n}{suffix}"] = (
+            grp_c["_pos_s_c"].rolling(n, min_periods=1).mean()
+            .reset_index(level=[0, 1, 2], drop=True)
+        )
+        df_cond[f"best_finish_last{n}{suffix}"] = (
+            grp_c["_pos_s_c"].rolling(n, min_periods=1).min()
+            .reset_index(level=[0, 1, 2], drop=True)
+        )
+        df_cond[f"avg_last3f_last{n}{suffix}"] = (
+            grp_c["_last3f_s_c"].rolling(n, min_periods=1).mean()
+            .reset_index(level=[0, 1, 2], drop=True)
+        )
+
+    cond_stat_cols = [
+        f"{stat}_last{n}_cond"
+        for stat in ["avg_finish", "best_finish", "avg_last3f"]
+        for n in [3, 5]
+    ]
+    for col in cond_stat_cols:
+        df[col] = df_cond[col]
 
     return df
 
