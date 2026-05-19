@@ -11,6 +11,7 @@ dependencies = [
 dev = [
     "ruff>=0.4",
     "pytest>=8.0",
+    "testcontainers[postgres]>=4.0",
 ]
 
 [build-system]
@@ -22,3 +23,6 @@ packages = ["repository"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
