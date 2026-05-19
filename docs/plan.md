@@ -63,6 +63,54 @@
 
 → 確定仕様は `spec.md` に記載。
 
+---
+
+## repository 共有パッケージの導入（検討中）
+
+### 背景
+
+- `scraper` が `Database` クラスと型定義（`types.py`）を持っている
+- `predictor` も今後 DB アクセスが必要になる
+- このまま進めると DB 接続コードと型定義が重複・乖離するリスクがある
+
+### 方針
+
+uv workspace の既存構成を活かし、`repository` パッケージを新設して共有層にする。
+
+```
+furlong/
+├── pyproject.toml          # members に "repository" を追加
+├── repository/             # 新設
+│   ├── pyproject.toml      # name = "furlong-repository", psycopg 依存はここに集約
+│   └── repository/
+│       ├── __init__.py
+│       ├── models.py       # 現 scraper/types.py の TypedDict 群を移動
+│       └── database.py     # 現 scraper/database.py の Database クラスを移動
+├── scraper/
+│   ├── pyproject.toml      # furlong-repository = { workspace = true } を追加、psycopg 依存を削除
+│   └── scraper/
+│       ├── types.py        # 削除（models.py に統合）
+│       └── database.py     # 削除（repository に移動）
+└── predictor/
+    ├── pyproject.toml      # furlong-repository = { workspace = true } を追加、psycopg 依存を削除
+    └── ...
+```
+
+### メリット
+
+- `psycopg` 依存が `repository` 側に一本化される
+- 型定義（`HorseProfile` 等）が一元化され、scraper/predictor で同じモデルを使える
+- predictor の DB アクセス実装時にゼロから書く必要がない
+
+### 懸念点
+
+- scraper 内の import パスが変わる（`from .types import ...` → `from repository.models import ...`）
+- 現時点では predictor の DB アクセスは未実装のため、恩恵はまだ小さい
+
+### 結論
+
+→ 議論中。実施する場合は `spec.md` に移す。
+
 ### SQL 設計メモ（予測時用）
 
 リーク防止のため `ROWS BETWEEN N PRECEDING AND 1 PRECEDING` を使い、当該レース自身を集計から除外する。
