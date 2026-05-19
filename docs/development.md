@@ -78,19 +78,24 @@ docker compose exec db psql -U furlong -d furlong
 # scraper
 uv run --package furlong-scraper python -m scraper.main
 
-# predictor
-uv run --package furlong-predictor python -m predictor.main
+# predictor: モデル学習
+uv run --package furlong-predictor python -m predictor.main train
+
+# predictor: 指定レースの予測
+uv run --package furlong-predictor python -m predictor.main predict <race_id>
 ```
 
 ## テスト
 
 ```bash
-# 全パッケージ
-uv run --package furlong-scraper pytest scraper
-uv run --package furlong-predictor pytest predictor
-
-# 特定パッケージのみ（例: scraper）
+# scraper
 uv run --package furlong-scraper pytest
+
+# predictor
+uv run --package furlong-predictor pytest
+
+# repository（統合テストあり。Docker が起動している必要がある）
+uv run --package furlong-repository pytest
 ```
 
 ## ビルド・デプロイ

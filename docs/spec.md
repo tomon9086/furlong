@@ -36,9 +36,10 @@ furlong/
 ├── docker-compose.yml   # PostgreSQL 起動設定
 ├── .env.example         # 環境変数テンプレート
 ├── scraper/             # netkeiba スクレイパー (Python)
-├── db/                  # テーブル定義 SQL
-│   └── schema.sql       # 全テーブル定義（sqldef で管理）
-└── predictor/           # 予想プログラム (Python)
+├── predictor/           # 予想プログラム (Python)
+├── repository/          # 共有データモデル・DB アクセス層 (Python)
+└── db/                  # テーブル定義 SQL
+    └── schema.sql       # 全テーブル定義（sqldef で管理）
 ```
 
 ### DB
