@@ -103,6 +103,7 @@ def predict(models: Models, df: pd.DataFrame) -> pd.DataFrame:
     if "horse_name" in df.columns:
         result["horse_name"] = df["horse_name"].values
     result["win_prob"] = win_probs
+    result["win_prob"] = result["win_prob"] / result.groupby("race_id")["win_prob"].transform("sum")
     result["place_prob"] = place_probs
     result["predicted_rank"] = (
         result.groupby("race_id")["win_prob"]

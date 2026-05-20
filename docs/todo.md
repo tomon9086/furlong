@@ -14,8 +14,10 @@
 
 ### #2 win_prob のレース内正規化
 
-- [ ] `model.py` の `predict()` 内でレース単位に `win_prob` を正規化（`win_prob / win_prob.groupby(race_id).transform('sum')`）
-- [ ] 正規化前後で評価指標を比較して効果確認
+- [x] `model.py` の `predict()` 内でレース単位に `win_prob` を正規化（`win_prob / win_prob.groupby(race_id).transform('sum')`）
+- [x] 正規化前後で評価指標を比較して効果確認
+  - win_accuracy: 0.3473 / recovery_rate: **1.1007** / win_logloss: 0.1984 / place_logloss: 0.3777
+  - recovery_rate +0.0159、win_logloss -0.0044 改善
 
 ### #3 人気別・オッズ帯別の評価指標追加
 
