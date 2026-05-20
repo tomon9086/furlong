@@ -60,11 +60,79 @@ WHERE r.race_id = %s
 ORDER BY rr.horse_number::integer
 """
 
-_HORSE_HISTORY_QUERY = f"""
-SELECT{_SELECT_COLS}{_FROM_CLAUSE}
-WHERE rr.horse_id = ANY(%s)
-  AND rr.finishing_position ~ '^[0-9]+$'
-ORDER BY TO_DATE(r.date, 'YYYY/MM/DD'), r.race_id, rr.horse_number::integer
+_RECENT_STATS_QUERY = """
+WITH history AS (
+  SELECT
+    rr.horse_id,
+    TO_DATE(r.date, 'YYYY/MM/DD') AS race_date,
+    r.race_id,
+    r.course_type,
+    r.distance,
+    rr.finishing_position::integer AS finishing_pos,
+    CASE WHEN rr.last_3f ~ '^\\d+\\.?\\d*$' THEN rr.last_3f::float ELSE NULL END AS last_3f_num
+  FROM race_results rr
+  JOIN races r ON rr.race_id = r.race_id
+  WHERE rr.finishing_position ~ '^[0-9]+$'
+    AND rr.horse_id = ANY(%s)
+),
+windowed AS (
+  SELECT
+    horse_id,
+    course_type,
+    distance,
+    AVG(finishing_pos) OVER w3  AS avg_finish_last3,
+    MIN(finishing_pos) OVER w3  AS best_finish_last3,
+    AVG(last_3f_num)   OVER w3  AS avg_last3f_last3,
+    AVG(finishing_pos) OVER w5  AS avg_finish_last5,
+    MIN(finishing_pos) OVER w5  AS best_finish_last5,
+    AVG(last_3f_num)   OVER w5  AS avg_last3f_last5,
+    AVG(finishing_pos) OVER w3c AS avg_finish_last3_cond,
+    MIN(finishing_pos) OVER w3c AS best_finish_last3_cond,
+    AVG(last_3f_num)   OVER w3c AS avg_last3f_last3_cond,
+    AVG(finishing_pos) OVER w5c AS avg_finish_last5_cond,
+    MIN(finishing_pos) OVER w5c AS best_finish_last5_cond,
+    AVG(last_3f_num)   OVER w5c AS avg_last3f_last5_cond,
+    ROW_NUMBER() OVER (PARTITION BY horse_id
+      ORDER BY race_date DESC, race_id DESC) AS rn_all,
+    ROW_NUMBER() OVER (PARTITION BY horse_id, course_type, distance
+      ORDER BY race_date DESC, race_id DESC) AS rn_cond
+  FROM history
+  WINDOW
+    w3  AS (PARTITION BY horse_id
+            ORDER BY race_date, race_id ROWS BETWEEN 2 PRECEDING AND CURRENT ROW),
+    w5  AS (PARTITION BY horse_id
+            ORDER BY race_date, race_id ROWS BETWEEN 4 PRECEDING AND CURRENT ROW),
+    w3c AS (PARTITION BY horse_id, course_type, distance
+            ORDER BY race_date, race_id ROWS BETWEEN 2 PRECEDING AND CURRENT ROW),
+    w5c AS (PARTITION BY horse_id, course_type, distance
+            ORDER BY race_date, race_id ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)
+),
+latest_all AS (
+  SELECT
+    horse_id,
+    avg_finish_last3, best_finish_last3, avg_last3f_last3,
+    avg_finish_last5, best_finish_last5, avg_last3f_last5
+  FROM windowed
+  WHERE rn_all = 1
+),
+latest_cond AS (
+  SELECT
+    horse_id,
+    avg_finish_last3_cond, best_finish_last3_cond, avg_last3f_last3_cond,
+    avg_finish_last5_cond, best_finish_last5_cond, avg_last3f_last5_cond
+  FROM windowed
+  WHERE rn_cond = 1
+    AND course_type = %s
+    AND distance = %s
+)
+SELECT
+  la.horse_id,
+  la.avg_finish_last3, la.best_finish_last3, la.avg_last3f_last3,
+  la.avg_finish_last5, la.best_finish_last5, la.avg_last3f_last5,
+  lc.avg_finish_last3_cond, lc.best_finish_last3_cond, lc.avg_last3f_last3_cond,
+  lc.avg_finish_last5_cond, lc.best_finish_last5_cond, lc.avg_last3f_last5_cond
+FROM latest_all la
+LEFT JOIN latest_cond lc ON la.horse_id = lc.horse_id
 """
 
 
@@ -79,10 +147,11 @@ def load_data(database_url: str) -> pd.DataFrame:
 
 
 def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
-    """予測対象レースの出走馬と各馬の過去成績を読み込む。
+    """予測対象レースの出走馬と、SQL ウィンドウ関数で計算した近走成績を読み込む。
 
     対象レースは finishing_position IS NULL の行を取得し、
-    各馬の過去成績は finishing_position が数値の行を取得する。
+    近走成績フィーチャーは SQL ウィンドウ関数で集計して直接返す。
+    全件の過去成績を Python に転送しないため、学習時より高速に動作する。
     """
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
@@ -94,12 +163,15 @@ def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
             target_df = pd.DataFrame(target_rows, columns=cols)
 
             horse_ids = target_df["horse_id"].dropna().tolist()
+            course_type = target_df["course_type"].iloc[0]
+            distance = int(target_df["distance"].iloc[0])
 
-            cur.execute(_HORSE_HISTORY_QUERY, (horse_ids,))
-            history_rows = cur.fetchall()
-            history_df = pd.DataFrame(history_rows, columns=cols)
+            cur.execute(_RECENT_STATS_QUERY, (horse_ids, course_type, distance))
+            stats_rows = cur.fetchall()
+            stats_cols = [desc[0] for desc in cur.description]
+            stats_df = pd.DataFrame(stats_rows, columns=stats_cols)
 
-    return pd.concat([history_df, target_df], ignore_index=True)
+    return target_df.merge(stats_df, on="horse_id", how="left")
 
 
 def _parse_finish_time(value: object) -> float | None:

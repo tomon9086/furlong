@@ -66,7 +66,6 @@ def predict_mode(race_id: str) -> None:
     """
     from predictor import model, output
     from predictor.preprocessing import (
-        compute_recent_stats,
         load_predict_data,
         preprocess,
     )
@@ -78,7 +77,6 @@ def predict_mode(race_id: str) -> None:
         sys.exit(1)
 
     df = preprocess(raw, keep_null_position=True)
-    df = compute_recent_stats(df)
 
     target = df[(df["race_id"] == race_id) & df["finishing_position"].isna()]
     if target.empty:
