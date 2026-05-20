@@ -7,7 +7,7 @@
 
 ### フェーズ1: leaky feature の除外とベースライン計測（必須）
 
-- [ ] `get_feature_columns()` から `finish_time_sec` / `first_corner_pos` / `odds` / `popularity` を除外する
+- [x] `get_feature_columns()` から `finish_time_sec` / `first_corner_pos` / `odds` / `popularity` を除外する
 - [ ] 除外後にモデルを再学習し、回収率・的中率・logloss のベースラインを計測・記録する
 
 ### フェーズ2: 先行指数フィーチャーの追加（実装難度：低）
