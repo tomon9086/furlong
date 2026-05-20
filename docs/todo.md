@@ -8,14 +8,14 @@
 ### フェーズ1: leaky feature の除外とベースライン計測（必須）
 
 - [x] `get_feature_columns()` から `finish_time_sec` / `first_corner_pos` / `odds` / `popularity` を除外する
-- [ ] 除外後にモデルを再学習し、回収率・的中率・logloss のベースラインを計測・記録する
+- [x] 除外後にモデルを再学習し、回収率・的中率・logloss のベースラインを計測・記録する
 
 ### フェーズ2: 先行指数フィーチャーの追加（実装難度：低）
 
-- [ ] `compute_recent_stats()` に `first_corner_pos`（通過順の先頭コーナー順位）の直近3走・5走平均を追加
-- [ ] 予測時クエリ `_RECENT_STATS_QUERY` に先行指数集計を追加
-- [ ] `get_feature_columns()` に先行指数フィーチャー（`avg_corner_last3` 等）を追加
-- [ ] 再学習して回収率の改善を計測
+- [x] `compute_recent_stats()` に `first_corner_pos`（通過順の先頭コーナー順位）の直近3走・5走平均を追加
+- [x] 予測時クエリ `_RECENT_STATS_QUERY` に先行指数集計を追加
+- [x] `get_feature_columns()` に先行指数フィーチャー（`avg_corner_last3` 等）を追加
+- [x] 再学習して回収率の改善を計測
 
 ### フェーズ3: 上がり3ハロン相対順位フィーチャーの追加（実装難度：中）
 
