@@ -10,6 +10,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://db.netkeiba.com"
+_RACE_BASE_URL = "https://race.netkeiba.com"
 _USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 _REQUEST_INTERVAL = 1.5
 _TIMEOUT = 30
@@ -44,6 +45,11 @@ class NetkeibaClient:
     def get_horse(self, horse_id: str) -> str:
         """馬詳細ページを取得してHTMLを返す."""
         url = f"{_BASE_URL}/horse/{horse_id}/"
+        return self._get(url)
+
+    def get_shutuba(self, race_id: str) -> str:
+        """出馬表ページを取得してHTMLを返す."""
+        url = f"{_RACE_BASE_URL}/race/shutuba.html?race_id={race_id}"
         return self._get(url)
 
     def _get(self, url: str) -> str:
