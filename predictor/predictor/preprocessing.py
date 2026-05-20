@@ -230,10 +230,32 @@ def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFra
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # タイム（秒換算）
-    df["finish_time_sec"] = df["finish_time"].apply(_parse_finish_time)
+    df["finish_time_sec"] = pd.to_numeric(
+        df["finish_time"].apply(_parse_finish_time), errors="coerce"
+    )
 
     # 通過順（最初のコーナー位置）
-    df["first_corner_pos"] = df["passing_order"].apply(_parse_first_corner)
+    df["first_corner_pos"] = pd.to_numeric(
+        df["passing_order"].apply(_parse_first_corner), errors="coerce"
+    )
+
+    # 近走成績フィーチャー（predict 時に NULL→object になるため数値化）
+    for col in (
+        "avg_finish_last3",
+        "best_finish_last3",
+        "avg_last3f_last3",
+        "avg_finish_last5",
+        "best_finish_last5",
+        "avg_last3f_last5",
+        "avg_finish_last3_cond",
+        "best_finish_last3_cond",
+        "avg_last3f_last3_cond",
+        "avg_finish_last5_cond",
+        "best_finish_last5_cond",
+        "avg_last3f_last5_cond",
+    ):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # 性別・年齢の分離（例: '牡5' → sex='牡', age=5）
     df["sex"] = df["sex_age"].str.extract(r"^([^\d]+)")
