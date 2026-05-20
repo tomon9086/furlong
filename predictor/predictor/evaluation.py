@@ -130,6 +130,65 @@ def evaluate_by_popularity(
     }
 
 
+def evaluate_by_grade(test_df: pd.DataFrame, pred_df: pd.DataFrame) -> pd.DataFrame:
+    """重賞グレード別の評価指標を計算する。
+
+    推奨馬（win_prob 最大馬）をグレード別でグループ化し、
+    各グループの推奨頻度・的中率・回収率を返す。
+
+    Parameters
+    ----------
+    test_df : pd.DataFrame
+        テストデータ（race_id, horse_number, is_win, odds, grade を含む）
+    pred_df : pd.DataFrame
+        予測結果（race_id, horse_number, win_prob を含む）
+
+    Returns
+    -------
+    pd.DataFrame
+        グレード別集計（GI / GII / GIII / L / 平場）
+    """
+    merged = test_df[["race_id", "horse_number", "is_win", "odds", "grade"]].merge(
+        pred_df[["race_id", "horse_number", "win_prob"]],
+        on=["race_id", "horse_number"],
+    )
+
+    merged["odds"] = pd.to_numeric(merged["odds"], errors="coerce")
+    # category 型を文字列に変換
+    merged["grade"] = merged["grade"].astype(str).replace({"nan": None, "": None})
+
+    # 各レースで win_prob 最大の馬を推奨馬とする
+    top1_idx = merged.groupby("race_id")["win_prob"].idxmax()
+    top1 = merged.loc[top1_idx].copy()
+
+    def _grade_tier(g: str | None) -> str:
+        if g in ("GI", "GII", "GIII", "L"):
+            return g
+        return "平場"
+
+    top1["grade_tier"] = top1["grade"].map(_grade_tier)
+
+    order = ["GI", "GII", "GIII", "L", "平場"]
+
+    agg = (
+        top1.groupby("grade_tier")
+        .apply(
+            lambda g: pd.Series(
+                {
+                    "推奨頻度": len(g),
+                    "的中率": float(g["is_win"].mean()),
+                    "回収率": float(
+                        (g["is_win"] * g["odds"] * 100).sum() / (len(g) * 100)
+                    ),
+                }
+            ),
+            include_groups=False,
+        )
+        .reindex(order)
+    )
+    return agg
+
+
 def ev_filter_analysis(
     test_df: pd.DataFrame,
     pred_df: pd.DataFrame,

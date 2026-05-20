@@ -49,6 +49,10 @@ def train_mode() -> None:
     print("--- オッズ帯別 ---")
     print(breakdown["odds_tier"].to_string())
 
+    grade_breakdown = evaluation.evaluate_by_grade(test_df, pred_df)
+    print("--- グレード別 ---")
+    print(grade_breakdown.to_string())
+
     ev_analysis = evaluation.ev_filter_analysis(test_df, pred_df)
     print("--- 期待値フィルタ別 ---")
     print(ev_analysis.to_string())
@@ -77,6 +81,7 @@ def predict_mode(race_id: str) -> None:
         answer = input("出馬表を取得しますか？ Y/n: ").strip().lower()
         if answer in ("", "y"):
             import subprocess
+
             result = subprocess.run(
                 [sys.executable, "-m", "scraper.main", "shutuba", race_id],
                 cwd=None,
@@ -86,7 +91,9 @@ def predict_mode(race_id: str) -> None:
                 sys.exit(1)
             raw = load_predict_data(DATABASE_URL, race_id)
             if raw.empty:
-                print(f"レース {race_id} の出走馬データが見つかりません", file=sys.stderr)
+                print(
+                    f"レース {race_id} の出走馬データが見つかりません", file=sys.stderr
+                )
                 sys.exit(1)
         else:
             sys.exit(1)
