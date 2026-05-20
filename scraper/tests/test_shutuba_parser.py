@@ -18,26 +18,30 @@ _SHUTUBA_HTML = """
 <html><body>
 <table class="Shutuba_Table">
   <tr class="HorseList" id="tr_01">
-    <td class="Waku"><span>1</span></td>
-    <td class="Umaban">1</td>
-    <td class="HorseName"><a href="/horse/2019105806">テストウマA</a></td>
-    <td class="Barei">牡4</td>
-    <td class="Kingairyo">57.0</td>
+    <td class="Waku1 Txt_C">1</td>
+    <td class="Umaban1 Txt_C">1</td>
+    <td class="CheckMark"></td>
+    <td class="HorseInfo"><a href="https://db.netkeiba.com/horse/2019105806">テストウマA</a></td>
+    <td class="Barei Txt_C">牡4</td>
+    <td class="Txt_C">57.0</td>
     <td class="Jockey"><a href="/jockey/result/recent/01234/">テスト騎手A</a></td>
     <td class="Trainer"><a href="/trainer/result/recent/56789/">テスト調教師A</a></td>
-    <td class="Odds">5.2</td>
-    <td class="Popular">2</td>
+    <td class="Weight">480(+2)</td>
+    <td class="Txt_R Popular">5.2</td>
+    <td class="Popular Popular_Ninki Txt_C">2</td>
   </tr>
   <tr class="HorseList" id="tr_02">
-    <td class="Waku"><span>1</span></td>
-    <td class="Umaban">2</td>
-    <td class="HorseName"><a href="/horse/2020100002">テストウマB</a></td>
-    <td class="Barei">牝3</td>
-    <td class="Kingairyo">54.0</td>
+    <td class="Waku1 Txt_C">1</td>
+    <td class="Umaban2 Txt_C">2</td>
+    <td class="CheckMark"></td>
+    <td class="HorseInfo"><a href="https://db.netkeiba.com/horse/2020100002">テストウマB</a></td>
+    <td class="Barei Txt_C">牝3</td>
+    <td class="Txt_C">54.0</td>
     <td class="Jockey"><a href="/jockey/result/recent/09876/">テスト騎手B</a></td>
     <td class="Trainer"><a href="/trainer/result/recent/43210/">テスト調教師B</a></td>
-    <td class="Odds">12.4</td>
-    <td class="Popular">5</td>
+    <td class="Weight">452(-4)</td>
+    <td class="Txt_R Popular">12.4</td>
+    <td class="Popular Popular_Ninki Txt_C">5</td>
   </tr>
 </table>
 </body></html>
@@ -47,9 +51,9 @@ _SHUTUBA_NO_UMABAN_HTML = """
 <html><body>
 <table class="Shutuba_Table">
   <tr class="HorseList" id="tr_03">
-    <td class="HorseName"><a href="/horse/2019100003">枠順未確定ウマ</a></td>
-    <td class="Barei">牡5</td>
-    <td class="Kingairyo">57.0</td>
+    <td class="HorseInfo"><a href="https://db.netkeiba.com/horse/2019100003">枠順未確定ウマ</a></td>
+    <td class="Barei Txt_C">牡5</td>
+    <td class="Txt_C">57.0</td>
     <td class="Jockey"><a href="/jockey/result/recent/11111/">テスト騎手C</a></td>
     <td class="Trainer"><a href="/trainer/result/recent/22222/">テスト調教師C</a></td>
   </tr>

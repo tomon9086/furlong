@@ -37,13 +37,13 @@ class ShutsubaParser(BaseParser):
 
         row: RaceDetailRow = {}
 
-        # 枠番
-        waku_td = tr.find("td", class_="Waku")
+        # 枠番: class が "Waku" で始まる td（例: Waku1, Waku2）
+        waku_td = tr.find("td", class_=re.compile(r"^Waku"))
         if waku_td:
             row["枠番"] = waku_td.get_text(strip=True)
 
-        # 馬番: Umaban クラス優先、なければ tr の id="tr_XX" から取得
-        umaban_td = tr.find("td", class_="Umaban")
+        # 馬番: class が "Umaban" で始まる td 優先、なければ tr の id="tr_XX" から取得
+        umaban_td = tr.find("td", class_=re.compile(r"^Umaban"))
         if umaban_td:
             row["馬番"] = umaban_td.get_text(strip=True)
         else:
@@ -52,8 +52,8 @@ class ShutsubaParser(BaseParser):
             if m:
                 row["馬番"] = str(int(m.group(1)))
 
-        # 馬名・馬ID
-        horse_td = tr.find("td", class_="HorseName")
+        # 馬名・馬ID: class="HorseInfo"
+        horse_td = tr.find("td", class_="HorseInfo")
         if horse_td:
             row["馬名"] = horse_td.get_text(strip=True)
             horse_link = horse_td.find("a", href=re.compile(r"/horse/"))
@@ -67,10 +67,12 @@ class ShutsubaParser(BaseParser):
         if sexage_td:
             row["性齢"] = sexage_td.get_text(strip=True)
 
-        # 斤量
-        kinryo_td = tr.find("td", class_="Kingairyo")
-        if kinryo_td:
-            row["斤量"] = kinryo_td.get_text(strip=True)
+        # 斤量: Barei td の次の td（クラスなし）
+        barei_td = tr.find("td", class_="Barei")
+        if barei_td:
+            kinryo_td = barei_td.find_next_sibling("td")
+            if kinryo_td:
+                row["斤量"] = kinryo_td.get_text(strip=True)
 
         # 騎手・騎手ID
         jockey_td = tr.find("td", class_="Jockey")
@@ -92,13 +94,18 @@ class ShutsubaParser(BaseParser):
                 if m:
                     row["調教師ID"] = m.group(1)
 
-        # 単勝オッズ
-        odds_td = tr.find("td", class_="Odds")
+        # 馬体重・体重変化: class="Weight"（例: "484(0)"）
+        weight_td = tr.find("td", class_="Weight")
+        if weight_td:
+            row["馬体重"] = weight_td.get_text(strip=True)
+
+        # 単勝オッズ: class="Txt_R" (Popular クラスと共存)
+        odds_td = tr.find("td", class_="Txt_R")
         if odds_td:
             row["単勝オッズ"] = odds_td.get_text(strip=True)
 
-        # 人気
-        popular_td = tr.find("td", class_="Popular")
+        # 人気: class="Popular_Ninki"
+        popular_td = tr.find("td", class_="Popular_Ninki")
         if popular_td:
             row["人気"] = popular_td.get_text(strip=True)
 
