@@ -61,24 +61,28 @@ def train_mode() -> None:
 def predict_mode(race_id: str) -> None:
     """予測モード: 指定レースの予測を行い出力する。
 
-    NOTE: 現在は全データをロードして対象レースを抽出する実装。
-    パフォーマンス改善は SQL ウィンドウ関数による絞り込みで対応予定。
+    finishing_position IS NULL の出走馬データと各馬の過去成績のみを取得し、
+    全データロードを行わない。
     """
     from predictor import model, output
     from predictor.preprocessing import (
         compute_recent_stats,
-        load_data,
+        load_predict_data,
         preprocess,
     )
 
     print(f"レース {race_id} の予測を開始...")
-    raw = load_data(DATABASE_URL)
-    df = preprocess(raw)
+    raw = load_predict_data(DATABASE_URL, race_id)
+    if raw.empty:
+        print(f"レース {race_id} の出走馬データが見つかりません", file=sys.stderr)
+        sys.exit(1)
+
+    df = preprocess(raw, keep_null_position=True)
     df = compute_recent_stats(df)
 
-    target = df[df["race_id"] == race_id]
+    target = df[(df["race_id"] == race_id) & df["finishing_position"].isna()]
     if target.empty:
-        print(f"レース {race_id} が見つかりません", file=sys.stderr)
+        print(f"レース {race_id} の予測対象行が見つかりません", file=sys.stderr)
         sys.exit(1)
 
     models = model.load_models()

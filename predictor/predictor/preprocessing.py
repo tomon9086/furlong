@@ -10,8 +10,7 @@ import psycopg
 # テストデータに使う直近の割合
 TEST_RATIO = 0.2
 
-_QUERY = """
-SELECT
+_SELECT_COLS = """
     r.race_id,
     r.date,
     r.venue,
@@ -41,23 +40,66 @@ SELECT
     rr.trainer_id,
     h.sire,
     h.dam,
-    h.broodmare_sire
+    h.broodmare_sire"""
+
+_FROM_CLAUSE = """
 FROM races r
 JOIN race_results rr ON r.race_id = rr.race_id
-LEFT JOIN horses h ON rr.horse_id = h.horse_id
+LEFT JOIN horses h ON rr.horse_id = h.horse_id"""
+
+_QUERY = f"""
+SELECT{_SELECT_COLS}{_FROM_CLAUSE}
 WHERE rr.finishing_position ~ '^[0-9]+$'
+ORDER BY TO_DATE(r.date, 'YYYY/MM/DD'), r.race_id, rr.horse_number::integer
+"""
+
+_PREDICT_RACE_QUERY = f"""
+SELECT{_SELECT_COLS}{_FROM_CLAUSE}
+WHERE r.race_id = %s
+  AND rr.finishing_position IS NULL
+ORDER BY rr.horse_number::integer
+"""
+
+_HORSE_HISTORY_QUERY = f"""
+SELECT{_SELECT_COLS}{_FROM_CLAUSE}
+WHERE rr.horse_id = ANY(%s)
+  AND rr.finishing_position ~ '^[0-9]+$'
 ORDER BY TO_DATE(r.date, 'YYYY/MM/DD'), r.race_id, rr.horse_number::integer
 """
 
 
 def load_data(database_url: str) -> pd.DataFrame:
-    """PostgreSQL からレース・出走馬データを読み込む。"""
+    """PostgreSQL からレース・出走馬データを読み込む（学習用）。"""
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
             cur.execute(_QUERY)
             rows = cur.fetchall()
             cols = [desc[0] for desc in cur.description]
     return pd.DataFrame(rows, columns=cols)
+
+
+def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
+    """予測対象レースの出走馬と各馬の過去成績を読み込む。
+
+    対象レースは finishing_position IS NULL の行を取得し、
+    各馬の過去成績は finishing_position が数値の行を取得する。
+    """
+    with psycopg.connect(database_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(_PREDICT_RACE_QUERY, (race_id,))
+            target_rows = cur.fetchall()
+            if not target_rows:
+                return pd.DataFrame()
+            cols = [desc[0] for desc in cur.description]
+            target_df = pd.DataFrame(target_rows, columns=cols)
+
+            horse_ids = target_df["horse_id"].dropna().tolist()
+
+            cur.execute(_HORSE_HISTORY_QUERY, (horse_ids,))
+            history_rows = cur.fetchall()
+            history_df = pd.DataFrame(history_rows, columns=cols)
+
+    return pd.concat([history_df, target_df], ignore_index=True)
 
 
 def _parse_finish_time(value: object) -> float | None:
@@ -85,8 +127,12 @@ def _parse_first_corner(value: object) -> int | None:
         return None
 
 
-def preprocess(df: pd.DataFrame) -> pd.DataFrame:
-    """生データを機械学習に適した形に変換する。"""
+def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFrame:
+    """生データを機械学習に適した形に変換する。
+
+    keep_null_position=True の場合、finishing_position が NULL の行（未来レース）を
+    保持する。predict 時に使用する。
+    """
     df = df.copy()
 
     # 日付
@@ -94,8 +140,9 @@ def preprocess(df: pd.DataFrame) -> pd.DataFrame:
 
     # ターゲット変数
     df["finishing_position"] = pd.to_numeric(df["finishing_position"], errors="coerce")
-    df = df.dropna(subset=["finishing_position"])
-    df["finishing_position"] = df["finishing_position"].astype(int)
+    if not keep_null_position:
+        df = df.dropna(subset=["finishing_position"])
+        df["finishing_position"] = df["finishing_position"].astype(int)
     df["is_win"] = (df["finishing_position"] == 1).astype(int)
     df["is_placed"] = (df["finishing_position"] <= 3).astype(int)
 
