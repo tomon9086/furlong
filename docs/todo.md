@@ -19,10 +19,9 @@
   - win_accuracy: 0.3473 / recovery_rate: **1.1007** / win_logloss: 0.1984 / place_logloss: 0.3777
   - recovery_rate +0.0159、win_logloss -0.0044 改善
 
-### #4 期待値ベースの買い目絞り込み
+### #5 期待値しきい値 1.5 の適用
 
-- [ ] `evaluation.py` に期待値フィルタ付き回収率を計算する関数を追加（`ev_filter_analysis(test_df, pred_df, thresholds)`）
-  - `win_prob × odds > threshold` で絞り込んだ場合の的中率・回収率・カバレッジを複数閾値で算出
-- [ ] `main.py` の評価フローで結果を出力し、最適閾値を確認
-
+- [ ] `predict_mode` の出力で EV < 1.5 の馬を除外し、買い目を絞り込む
+  - `win_prob × odds > 1.5` を満たす馬のみ推奨として出力する
+- [ ] しきい値適用後の予測出力を確認
 
