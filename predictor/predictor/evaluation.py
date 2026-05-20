@@ -128,3 +128,77 @@ def evaluate_by_popularity(
         "popularity_tier": _aggregate(top1, "popularity_tier", popularity_order),
         "odds_tier": _aggregate(top1, "odds_tier", odds_order),
     }
+
+
+def ev_filter_analysis(
+    test_df: pd.DataFrame,
+    pred_df: pd.DataFrame,
+    thresholds: list[float] | None = None,
+) -> pd.DataFrame:
+    """期待値フィルタ付き回収率分析。
+
+    ``win_prob × odds > threshold`` で絞り込んだ場合の
+    的中率・回収率・カバレッジを複数閾値で算出する。
+
+    Parameters
+    ----------
+    test_df : pd.DataFrame
+        テストデータ（race_id, horse_number, is_win, odds を含む）
+    pred_df : pd.DataFrame
+        予測結果（race_id, horse_number, win_prob を含む）
+    thresholds : list[float] | None
+        期待値の閾値リスト。None の場合はデフォルト値を使用。
+
+    Returns
+    -------
+    pd.DataFrame
+        各閾値での 推奨数・的中数・的中率・回収率・カバレッジ
+    """
+    if thresholds is None:
+        thresholds = [1.0, 1.2, 1.5, 2.0, 3.0]
+
+    merged = test_df[["race_id", "horse_number", "is_win", "odds"]].merge(
+        pred_df[["race_id", "horse_number", "win_prob"]],
+        on=["race_id", "horse_number"],
+    )
+    merged["odds"] = pd.to_numeric(merged["odds"], errors="coerce")
+    merged["ev"] = merged["win_prob"] * merged["odds"]
+
+    total_races = merged["race_id"].nunique()
+
+    rows = []
+    for thr in thresholds:
+        filtered = merged[merged["ev"] > thr]
+        n = len(filtered)
+        if n == 0:
+            rows.append(
+                {
+                    "threshold": thr,
+                    "推奨数": 0,
+                    "的中数": 0,
+                    "的中率": float("nan"),
+                    "回収率": float("nan"),
+                    "カバレッジ": 0.0,
+                }
+            )
+            continue
+
+        wins = int(filtered["is_win"].sum())
+        win_rate = float(filtered["is_win"].mean())
+        recovered = float((filtered["is_win"] * filtered["odds"] * 100).sum())
+        recovery_rate = recovered / (n * 100)
+        covered_races = filtered["race_id"].nunique()
+        coverage = covered_races / total_races if total_races > 0 else 0.0
+
+        rows.append(
+            {
+                "threshold": thr,
+                "推奨数": n,
+                "的中数": wins,
+                "的中率": win_rate,
+                "回収率": recovery_rate,
+                "カバレッジ": coverage,
+            }
+        )
+
+    return pd.DataFrame(rows).set_index("threshold")

@@ -49,6 +49,10 @@ def train_mode() -> None:
     print("--- オッズ帯別 ---")
     print(breakdown["odds_tier"].to_string())
 
+    ev_analysis = evaluation.ev_filter_analysis(test_df, pred_df)
+    print("--- 期待値フィルタ別 ---")
+    print(ev_analysis.to_string())
+
     print("モデルを保存中...")
     version_dir = model.save_models(models)
     print(f"完了 ({version_dir.name})")
