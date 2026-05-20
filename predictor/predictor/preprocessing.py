@@ -12,6 +12,7 @@ TEST_RATIO = 0.2
 
 _SELECT_COLS = """
     r.race_id,
+    r.race_name,
     r.date,
     r.venue,
     r.course_type,
@@ -304,6 +305,14 @@ def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFra
     df["sex"] = df["sex_age"].str.extract(r"^([^\d]+)")
     df["age"] = pd.to_numeric(df["sex_age"].str.extract(r"(\d+)$")[0], errors="coerce")
 
+    # grade 補完: NULL の場合に race_name から (GI)/(GII)/(GIII)/(L) を抽出
+    if "race_name" in df.columns:
+        missing_grade = df["grade"].isna() | (df["grade"].astype(str).str.strip() == "")
+        extracted = df.loc[missing_grade, "race_name"].str.extract(
+            r"\((GI{1,3}|L)\)", expand=False
+        )
+        df.loc[missing_grade, "grade"] = extracted
+
     # カテゴリ変数
     cat_cols = [
         "venue",
@@ -323,7 +332,10 @@ def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFra
         df[col] = df[col].astype("category")
 
     # 不要カラムの削除
-    df = df.drop(columns=["sex_age", "finish_time", "passing_order"])
+    df = df.drop(
+        columns=["sex_age", "finish_time", "passing_order", "race_name"],
+        errors="ignore",
+    )
 
     return df
 
@@ -348,7 +360,9 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
     df["_pos_s"] = df.groupby("horse_id", observed=True)["finishing_position"].shift(1)
     df["_last3f_s"] = df.groupby("horse_id", observed=True)["last_3f"].shift(1)
     df["_corner_s"] = df.groupby("horse_id", observed=True)["first_corner_pos"].shift(1)
-    df["_last3f_rank_s"] = df.groupby("horse_id", observed=True)["last_3f_rank"].shift(1)
+    df["_last3f_rank_s"] = df.groupby("horse_id", observed=True)["last_3f_rank"].shift(
+        1
+    )
 
     for n, suffix in [(3, ""), (5, "")]:
         grp = df.groupby("horse_id", observed=True, sort=False)
@@ -394,8 +408,12 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
             1
         ),
         _last3f_s_c=df_cond.groupby(cond_key, observed=True)["last_3f"].shift(1),
-        _corner_s_c=df_cond.groupby(cond_key, observed=True)["first_corner_pos"].shift(1),
-        _last3f_rank_s_c=df_cond.groupby(cond_key, observed=True)["last_3f_rank"].shift(1),
+        _corner_s_c=df_cond.groupby(cond_key, observed=True)["first_corner_pos"].shift(
+            1
+        ),
+        _last3f_rank_s_c=df_cond.groupby(cond_key, observed=True)["last_3f_rank"].shift(
+            1
+        ),
     )
 
     for n, suffix in [(3, "_cond"), (5, "_cond")]:
@@ -433,7 +451,13 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
 
     cond_stat_cols = [
         f"{stat}_last{n}_cond"
-        for stat in ["avg_finish", "best_finish", "avg_last3f", "avg_corner", "avg_last3f_rank"]
+        for stat in [
+            "avg_finish",
+            "best_finish",
+            "avg_last3f",
+            "avg_corner",
+            "avg_last3f_rank",
+        ]
         for n in [3, 5]
     ]
     for col in cond_stat_cols:
