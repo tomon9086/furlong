@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 _BASE_URL = "https://db.netkeiba.com"
 _RACE_BASE_URL = "https://race.netkeiba.com"
 _USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-_REQUEST_INTERVAL = 1.5
+_REQUEST_INTERVAL = 3.0
 _TIMEOUT = 30
 _MAX_RETRIES = 3
 _RETRY_STATUS = {429, 500, 502, 503, 504}
@@ -36,6 +36,24 @@ class NetkeibaClient:
             follow_redirects=True,
             timeout=timeout,
         )
+
+    def get_race_list(
+        self,
+        start_year: int,
+        start_mon: int,
+        end_year: int,
+        end_mon: int,
+        page: int = 1,
+        list_size: int = 100,
+    ) -> str:
+        """レース一覧ページを取得してHTMLを返す."""
+        url = (
+            f"{_BASE_URL}/?pid=race_list"
+            f"&start_year={start_year}&start_mon={start_mon}"
+            f"&end_year={end_year}&end_mon={end_mon}"
+            f"&sort=date&list={list_size}&page={page}"
+        )
+        return self._get(url)
 
     def get_race(self, race_id: str) -> str:
         """レース詳細ページを取得してHTMLを返す."""
