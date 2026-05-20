@@ -11,9 +11,9 @@
 - [x] `ShutsubaParser` を新規作成
   - [x] `parse_race_info(html)` — `h1.RaceName` / `div.RaceData01` / `div.RaceData02` からレース情報を取得
   - [x] `parse(html)` — `tr.HorseList` から出走馬一覧を取得（枠順未確定時は `id="tr_XX"` から馬番を取得）
-- [ ] `scraper/main.py` に `shutuba` モードを追加（`python -m scraper shutuba <race_id>`）
-  - [ ] 出馬表取り込み時に未登録馬を `scrape_horse()` で自動補完
-- [ ] `scraper/tests/` に `ShutsubaParser` のテストを追加
+- [x] `scraper/main.py` に `shutuba` モードを追加（`python -m scraper shutuba <race_id>`）
+  - [x] 出馬表取り込み時に未登録馬を `scrape_horse()` で自動補完
+- [x] `scraper/tests/` に `ShutsubaParser` のテストを追加
 
 ### predictor: 未来レース予測対応
 
