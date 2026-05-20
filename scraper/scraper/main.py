@@ -3,6 +3,7 @@
 import logging
 import os
 import sys
+from datetime import date
 
 from dotenv import load_dotenv
 
@@ -107,7 +108,9 @@ def scrape_backfill(year: int, month: int) -> None:
         # DB に未登録のレースだけ対象にする
         existing_ids = db.get_existing_race_ids(all_race_ids)
         missing_ids = [rid for rid in all_race_ids if rid not in existing_ids]
-        logger.info("未登録レース数: %d（スキップ: %d）", len(missing_ids), len(existing_ids))
+        logger.info(
+            "未登録レース数: %d（スキップ: %d）", len(missing_ids), len(existing_ids)
+        )
 
         for i, race_id in enumerate(missing_ids, start=1):
             logger.info("[%d/%d] レース %s を取得中...", i, len(missing_ids), race_id)
@@ -118,25 +121,78 @@ def scrape_backfill(year: int, month: int) -> None:
                 payoffs = race_parser.parse_payoff(html)
                 db.save_race(race_id, race_info, results, payoffs)
             except Exception:
-                logger.exception("レース %s の取得に失敗しました。スキップします。", race_id)
+                logger.exception(
+                    "レース %s の取得に失敗しました。スキップします。", race_id
+                )
+
+
+def scrape_incremental(start_date: date | None = None) -> None:
+    """最終取得日の翌月から今月までの全レースを差分スクレイピングする.
+
+    Args:
+        start_date: スクレイピング開始月を指定する場合に渡す (手動実行用)。
+                    省略時は DB の最新レース日付の月を開始月とする。
+                    DB が空の場合はエラーを出力して終了する。
+    """
+    today = date.today()
+
+    if start_date is not None:
+        start_year, start_month = start_date.year, start_date.month
+    else:
+        db = Database(DATABASE_URL)
+        latest = db.get_latest_race_date()
+        if latest is None:
+            logger.error(
+                "DB にレースが1件もありません。--start-date で開始月を指定してください。"
+            )
+            return
+        start_year, start_month = latest
+
+    logger.info(
+        "%d年%d月 〜 %d年%d月 の差分スクレイピングを開始します。",
+        start_year,
+        start_month,
+        today.year,
+        today.month,
+    )
+
+    year, month = start_year, start_month
+    while (year, month) <= (today.year, today.month):
+        logger.info("=== %d年%d月 ===", year, month)
+        scrape_backfill(year, month)
+        if month == 12:
+            year, month = year + 1, 1
+        else:
+            month += 1
 
 
 def main() -> None:
-    if len(sys.argv) < 3:
-        print("使用方法: python -m scraper <mode> <id>")
-        print("  mode=race     例: python -m scraper race 202506050801")
-        print("  mode=horse    例: python -m scraper horse 2019105806")
-        print("  mode=shutuba  例: python -m scraper shutuba 202506050801")
-        print("  mode=backfill 例: python -m scraper backfill 2026 1")
+    if len(sys.argv) < 2:
+        print("使用方法: python -m scraper <mode> [args...]")
+        print("  mode=race        例: python -m scraper race 202506050801")
+        print("  mode=horse       例: python -m scraper horse 2019105806")
+        print("  mode=shutuba     例: python -m scraper shutuba 202506050801")
+        print("  mode=backfill    例: python -m scraper backfill 2026 1")
+        print("  mode=incremental 例: python -m scraper incremental")
+        print("                      python -m scraper incremental 2026 5")
         sys.exit(1)
 
     mode = sys.argv[1]
 
     if mode == "race":
+        if len(sys.argv) < 3:
+            print("使用方法: python -m scraper race <race_id>")
+            sys.exit(1)
         scrape_race(sys.argv[2])
     elif mode == "horse":
+        if len(sys.argv) < 3:
+            print("使用方法: python -m scraper horse <horse_id>")
+            sys.exit(1)
         scrape_horse(sys.argv[2])
     elif mode == "shutuba":
+        if len(sys.argv) < 3:
+            print("使用方法: python -m scraper shutuba <race_id>")
+            sys.exit(1)
         scrape_shutuba(sys.argv[2])
     elif mode == "backfill":
         if len(sys.argv) < 4:
@@ -144,6 +200,12 @@ def main() -> None:
             print("  例: python -m scraper backfill 2026 1")
             sys.exit(1)
         scrape_backfill(int(sys.argv[2]), int(sys.argv[3]))
+    elif mode == "incremental":
+        if len(sys.argv) >= 4:
+            start = date(int(sys.argv[2]), int(sys.argv[3]), 1)
+            scrape_incremental(start_date=start)
+        else:
+            scrape_incremental()
     else:
         print(f"不明なmode: {mode}")
         sys.exit(1)
