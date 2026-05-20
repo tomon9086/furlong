@@ -20,5 +20,5 @@
 - [x] 予測時クエリを分離 — 指定 `race_id` の出走馬を `finishing_position IS NULL` で取得
 - [x] 近走成績フィーチャーをウィンドウ関数 SQL で計算（plan.md 記載の SQL を実装）
 - [x] `output.py` に推奨買い目（馬連・三連複）の生成を追加
-- [ ] `predictor/main.py predict <race_id>` が出馬表データで動作することを確認
+- [x] `predictor/main.py predict <race_id>` が出馬表データで動作することを確認
 
