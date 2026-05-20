@@ -269,3 +269,15 @@ class Database:
                     (race_ids,),
                 )
                 return {row[0] for row in cur.fetchall()}
+
+    def get_latest_race_date(self) -> tuple[int, int] | None:
+        """DB に登録されている最新レースの (year, month) を返す。レースが1件もない場合は None を返す."""
+        with psycopg.connect(self._database_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT MAX(date) FROM races WHERE date IS NOT NULL")
+                row = cur.fetchone()
+                if row is None or row[0] is None:
+                    return None
+                # date は "YYYY/MM/DD" 形式で格納されている
+                parts = str(row[0]).split("/")
+                return int(parts[0]), int(parts[1])
