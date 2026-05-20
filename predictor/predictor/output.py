@@ -7,25 +7,33 @@ from pathlib import Path
 import pandas as pd
 
 _OUTPUT_DIR = Path("output")
+_EV_THRESHOLD = 1.5
 
 
 def _mark_recommended(pred_df: pd.DataFrame) -> pd.DataFrame:
     """推奨買い目フラグを付与する。
 
-    - 単勝: win_prob 上位1頭
+    - 単勝: win_prob 上位1頭 かつ EV（win_prob × odds）> _EV_THRESHOLD
     - 複勝: place_prob 上位3頭
     """
     df = pred_df.copy()
 
+    if "odds" in df.columns:
+        df["odds"] = pd.to_numeric(df["odds"], errors="coerce")
+        df["ev"] = df["win_prob"] * df["odds"]
+
     win_top_idx = df.groupby("race_id")["win_prob"].idxmax()
     df["recommended_win"] = False
-    df.loc[win_top_idx, "recommended_win"] = True
+    if "ev" in df.columns:
+        valid_win_idx = [i for i in win_top_idx if df.loc[i, "ev"] > _EV_THRESHOLD]
+    else:
+        valid_win_idx = list(win_top_idx)
+    df.loc[valid_win_idx, "recommended_win"] = True
 
     place_rank = df.groupby("race_id")["place_prob"].rank(ascending=False, method="min")
     df["recommended_place"] = place_rank <= 3
 
     df["recommended"] = df["recommended_win"] | df["recommended_place"]
-    df = df.drop(columns=["recommended_win"])
 
     return df
 
@@ -36,19 +44,22 @@ def print_prediction(pred_df: pd.DataFrame) -> None:
     display_cols = ["horse_number", "win_prob", "place_prob", "predicted_rank", "recommended"]
     if "horse_name" in df.columns:
         display_cols.insert(1, "horse_name")
+    if "ev" in df.columns:
+        display_cols.insert(display_cols.index("recommended"), "ev")
 
     for race_id, group in df.groupby("race_id"):
         group = group.sort_values("predicted_rank")
         print(f"\n=== レース {race_id} ===")
         print(group[display_cols].to_string(index=False))
 
-        rec = group[group["recommended"]].sort_values("predicted_rank")
-        win_horse = group.loc[group["recommended_place"] == False].head(0)  # placeholder
-        win_horse = group[group.groupby("race_id")["win_prob"].transform("max") == group["win_prob"]]
-        place_horses = group[group["place_prob"].rank(ascending=False, method="min") <= 3]
+        win_horses = group[group["recommended_win"]]
+        place_horses = group[group["recommended_place"]]
 
         print("\n  推奨買い目:")
-        print(f"    単勝 : {win_horse['horse_number'].tolist()}")
+        if win_horses.empty:
+            print(f"    単勝 : (EV しきい値 {_EV_THRESHOLD} 未達・推奨なし)")
+        else:
+            print(f"    単勝 : {win_horses['horse_number'].tolist()}")
         print(f"    複勝 : {place_horses['horse_number'].tolist()}")
         if len(place_horses) >= 2:
             top2 = place_horses.nsmallest(2, "predicted_rank")["horse_number"].tolist()
