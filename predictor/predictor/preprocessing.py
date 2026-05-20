@@ -389,9 +389,6 @@ def get_feature_columns() -> list[str]:
         "weight_carried",
         "horse_weight",
         "horse_weight_diff",
-        # 市場評価
-        "odds",
-        "popularity",
         # 近走成績（全レース・直近3走）
         "avg_finish_last3",
         "best_finish_last3",
@@ -415,9 +412,6 @@ def get_feature_columns() -> list[str]:
         # 騎手・調教師
         "jockey_id",
         "trainer_id",
-        # タイム・通過順
-        "finish_time_sec",
-        "first_corner_pos",
     ]
 
 
