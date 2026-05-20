@@ -549,9 +549,9 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
     trainer_key = ["trainer_id"]
     df_trainer = df.sort_values(trainer_key + ["date", "race_id"])
 
-    df_trainer["_trainer_is_win_s"] = df_trainer.groupby(
-        trainer_key, observed=True
-    )["is_win"].shift(1)
+    df_trainer["_trainer_is_win_s"] = df_trainer.groupby(trainer_key, observed=True)[
+        "is_win"
+    ].shift(1)
 
     df_trainer["trainer_win_rate_last30"] = (
         df_trainer.groupby(trainer_key, observed=True, sort=False)["_trainer_is_win_s"]
