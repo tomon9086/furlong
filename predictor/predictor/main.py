@@ -43,6 +43,12 @@ def train_mode() -> None:
     for k, v in metrics.items():
         print(f"  {k}: {v:.4f}")
 
+    breakdown = evaluation.evaluate_by_popularity(test_df, pred_df)
+    print("--- 人気帯別 ---")
+    print(breakdown["popularity_tier"].to_string())
+    print("--- オッズ帯別 ---")
+    print(breakdown["odds_tier"].to_string())
+
     print("モデルを保存中...")
     version_dir = model.save_models(models)
     print(f"完了 ({version_dir.name})")
