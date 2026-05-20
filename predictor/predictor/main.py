@@ -73,8 +73,23 @@ def predict_mode(race_id: str) -> None:
     print(f"レース {race_id} の予測を開始...")
     raw = load_predict_data(DATABASE_URL, race_id)
     if raw.empty:
-        print(f"レース {race_id} の出走馬データが見つかりません", file=sys.stderr)
-        sys.exit(1)
+        print(f"レース {race_id} の出走馬データが見つかりません")
+        answer = input("出馬表を取得しますか？ Y/n: ").strip().lower()
+        if answer in ("", "y"):
+            import subprocess
+            result = subprocess.run(
+                [sys.executable, "-m", "scraper.main", "shutuba", race_id],
+                cwd=None,
+            )
+            if result.returncode != 0:
+                print("出馬表の取得に失敗しました", file=sys.stderr)
+                sys.exit(1)
+            raw = load_predict_data(DATABASE_URL, race_id)
+            if raw.empty:
+                print(f"レース {race_id} の出走馬データが見つかりません", file=sys.stderr)
+                sys.exit(1)
+        else:
+            sys.exit(1)
 
     df = preprocess(raw, keep_null_position=True)
 
