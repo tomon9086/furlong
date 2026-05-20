@@ -180,6 +180,28 @@ WHERE rr.finishing_position ~ '^[0-9]+$'
 GROUP BY rr.jockey_id
 """
 
+_TRAINER_WIN_RATE_QUERY = """
+SELECT
+  trainer_id,
+  SUM(CASE WHEN finishing_position::integer = 1 THEN 1 ELSE 0 END)::float
+    / NULLIF(COUNT(*), 0) AS trainer_win_rate_last30
+FROM (
+  SELECT
+    rr2.trainer_id,
+    rr2.finishing_position,
+    ROW_NUMBER() OVER (
+      PARTITION BY rr2.trainer_id
+      ORDER BY TO_DATE(r2.date, 'YYYY/MM/DD') DESC, rr2.race_id DESC
+    ) AS rn
+  FROM race_results rr2
+  JOIN races r2 ON rr2.race_id = r2.race_id
+  WHERE rr2.finishing_position ~ '^[0-9]+$'
+    AND rr2.trainer_id = ANY(%s)
+) sub
+WHERE rn <= 30
+GROUP BY trainer_id
+"""
+
 
 def load_data(database_url: str) -> pd.DataFrame:
     """PostgreSQL からレース・出走馬データを読み込む（学習用）。"""
@@ -209,6 +231,7 @@ def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
 
             horse_ids = target_df["horse_id"].dropna().tolist()
             jockey_ids = target_df["jockey_id"].dropna().tolist()
+            trainer_ids = target_df["trainer_id"].dropna().tolist()
             venue = target_df["venue"].iloc[0]
             course_type = target_df["course_type"].iloc[0]
             distance = int(target_df["distance"].iloc[0])
@@ -223,8 +246,15 @@ def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
             jockey_cols = [desc[0] for desc in cur.description]
             jockey_df = pd.DataFrame(jockey_rows, columns=jockey_cols)
 
-    return target_df.merge(stats_df, on="horse_id", how="left").merge(
-        jockey_df, on="jockey_id", how="left"
+            cur.execute(_TRAINER_WIN_RATE_QUERY, (trainer_ids,))
+            trainer_rows = cur.fetchall()
+            trainer_cols = [desc[0] for desc in cur.description]
+            trainer_df = pd.DataFrame(trainer_rows, columns=trainer_cols)
+
+    return (
+        target_df.merge(stats_df, on="horse_id", how="left")
+        .merge(jockey_df, on="jockey_id", how="left")
+        .merge(trainer_df, on="trainer_id", how="left")
     )
 
 
@@ -321,6 +351,7 @@ def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFra
         "avg_last3f_rank_last3_cond",
         "avg_last3f_rank_last5_cond",
         "jockey_win_rate_venue_cond",
+        "trainer_win_rate_last30",
     ):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -514,6 +545,23 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
     )
     df["jockey_win_rate_venue_cond"] = df_jockey["jockey_win_rate_venue_cond"]
 
+    # ── 調教師: 直近30走勝率 ──────────────────────────────────────────────
+    trainer_key = ["trainer_id"]
+    df_trainer = df.sort_values(trainer_key + ["date", "race_id"])
+
+    df_trainer["_trainer_is_win_s"] = df_trainer.groupby(
+        trainer_key, observed=True
+    )["is_win"].shift(1)
+
+    df_trainer["trainer_win_rate_last30"] = (
+        df_trainer.groupby(trainer_key, observed=True, sort=False)["_trainer_is_win_s"]
+        .rolling(30, min_periods=1)
+        .mean()
+        .reset_index(level=0, drop=True)
+    )
+    df_trainer = df_trainer.drop(columns=["_trainer_is_win_s"])
+    df["trainer_win_rate_last30"] = df_trainer["trainer_win_rate_last30"]
+
     return df
 
 
@@ -571,6 +619,8 @@ def get_feature_columns() -> list[str]:
         "broodmare_sire",
         # 騎手統計
         "jockey_win_rate_venue_cond",
+        # 調教師統計
+        "trainer_win_rate_last30",
         # 騎手・調教師
         "jockey_id",
         "trainer_id",
