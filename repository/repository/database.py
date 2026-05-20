@@ -245,3 +245,15 @@ class Database:
                 )
 
         logger.info("馬 %s (%s) を保存", horse_id, profile.get("馬名"))
+
+    def get_existing_horse_ids(self, horse_ids: list[str]) -> set[str]:
+        """指定された馬IDのうち、すでに DB に登録済みのものを返す."""
+        if not horse_ids:
+            return set()
+        with psycopg.connect(self._database_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT horse_id FROM horses WHERE horse_id = ANY(%s)",
+                    (horse_ids,),
+                )
+                return {row[0] for row in cur.fetchall()}
