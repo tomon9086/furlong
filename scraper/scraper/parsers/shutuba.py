@@ -90,7 +90,9 @@ class ShutsubaParser(BaseParser):
             row["調教師"] = trainer_td.get_text(strip=True)
             trainer_link = trainer_td.find("a", href=re.compile(r"/trainer/"))
             if trainer_link and trainer_link.get("href"):
-                m = re.search(r"/trainer/(?:result/recent/)?(\d+)", trainer_link["href"])
+                m = re.search(
+                    r"/trainer/(?:result/recent/)?(\d+)", trainer_link["href"]
+                )
                 if m:
                     row["調教師ID"] = m.group(1)
 
@@ -166,7 +168,9 @@ class ShutsubaParser(BaseParser):
 
             m = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", text02)
             if m:
-                info["日付"] = f"{m.group(1)}/{m.group(2).zfill(2)}/{m.group(3).zfill(2)}"
+                info["日付"] = (
+                    f"{m.group(1)}/{m.group(2).zfill(2)}/{m.group(3).zfill(2)}"
+                )
 
             m = re.search(r"\d+回(\S+?)\d+日目", text02)
             if m:

@@ -306,15 +306,21 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
     for n, suffix in [(3, ""), (5, "")]:
         grp = df.groupby("horse_id", observed=True, sort=False)
         df[f"avg_finish_last{n}{suffix}"] = (
-            grp["_pos_s"].rolling(n, min_periods=1).mean()
+            grp["_pos_s"]
+            .rolling(n, min_periods=1)
+            .mean()
             .reset_index(level=0, drop=True)
         )
         df[f"best_finish_last{n}{suffix}"] = (
-            grp["_pos_s"].rolling(n, min_periods=1).min()
+            grp["_pos_s"]
+            .rolling(n, min_periods=1)
+            .min()
             .reset_index(level=0, drop=True)
         )
         df[f"avg_last3f_last{n}{suffix}"] = (
-            grp["_last3f_s"].rolling(n, min_periods=1).mean()
+            grp["_last3f_s"]
+            .rolling(n, min_periods=1)
+            .mean()
             .reset_index(level=0, drop=True)
         )
 
@@ -325,22 +331,30 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
     df_cond = df.sort_values(cond_key + ["date", "race_id"])
 
     df_cond = df_cond.assign(
-        _pos_s_c=df_cond.groupby(cond_key, observed=True)["finishing_position"].shift(1),
+        _pos_s_c=df_cond.groupby(cond_key, observed=True)["finishing_position"].shift(
+            1
+        ),
         _last3f_s_c=df_cond.groupby(cond_key, observed=True)["last_3f"].shift(1),
     )
 
     for n, suffix in [(3, "_cond"), (5, "_cond")]:
         grp_c = df_cond.groupby(cond_key, observed=True, sort=False)
         df_cond[f"avg_finish_last{n}{suffix}"] = (
-            grp_c["_pos_s_c"].rolling(n, min_periods=1).mean()
+            grp_c["_pos_s_c"]
+            .rolling(n, min_periods=1)
+            .mean()
             .reset_index(level=[0, 1, 2], drop=True)
         )
         df_cond[f"best_finish_last{n}{suffix}"] = (
-            grp_c["_pos_s_c"].rolling(n, min_periods=1).min()
+            grp_c["_pos_s_c"]
+            .rolling(n, min_periods=1)
+            .min()
             .reset_index(level=[0, 1, 2], drop=True)
         )
         df_cond[f"avg_last3f_last{n}{suffix}"] = (
-            grp_c["_last3f_s_c"].rolling(n, min_periods=1).mean()
+            grp_c["_last3f_s_c"]
+            .rolling(n, min_periods=1)
+            .mean()
             .reset_index(level=[0, 1, 2], drop=True)
         )
 
