@@ -21,10 +21,10 @@
 
 ### #3 人気別・オッズ帯別の評価指標追加
 
-- [ ] `evaluation.py` に `evaluate_by_popularity(test_df, pred_df)` 関数を追加
+- [x] `evaluation.py` に `evaluate_by_popularity(test_df, pred_df)` 関数を追加
   - 人気帯別（1番人気 / 2-3番 / 4-6番 / 7番以下）の推奨頻度・的中率・回収率を集計
   - オッズ帯別（〜1.9倍 / 2-4倍 / 5-9倍 / 10倍以上）の推奨頻度・的中率・回収率を集計
-- [ ] `main.py` の評価フローで `evaluate_by_popularity()` を呼び出して出力
+- [x] `main.py` の評価フローで `evaluate_by_popularity()` を呼び出して出力
 
 ### #4 期待値ベースの買い目絞り込み
 
