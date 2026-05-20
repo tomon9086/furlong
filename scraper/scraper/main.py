@@ -82,37 +82,43 @@ def scrape_backfill(year: int, month: int) -> None:
     """指定年月の全レースをスクレイピングして DB に保存する.
 
     レース一覧ページを全ページ走査し、DB に未登録のレースのみ取得する。
+    クライアントを使い回すことでインターバルが正しく機能する。
     """
-    parser = RaceListParser()
+    list_parser = RaceListParser()
+    race_parser = RaceDetailParser()
     db = Database(DATABASE_URL)
 
     with NetkeibaClient() as client:
         # 1ページ目を取得して総ページ数を確認
         logger.info("%d年%d月のレース一覧を取得中...", year, month)
         first_html = client.get_race_list(year, month, year, month, page=1)
-        total_pages = parser.parse_total_pages(first_html)
+        total_pages = list_parser.parse_total_pages(first_html)
         logger.info("総ページ数: %d", total_pages)
 
-        all_race_ids: list[str] = parser.parse(first_html)
+        all_race_ids: list[str] = list_parser.parse(first_html)
 
         for page in range(2, total_pages + 1):
             logger.info("ページ %d/%d を取得中...", page, total_pages)
             html = client.get_race_list(year, month, year, month, page=page)
-            all_race_ids.extend(parser.parse(html))
+            all_race_ids.extend(list_parser.parse(html))
 
-    logger.info("一覧から取得したレース数: %d", len(all_race_ids))
+        logger.info("一覧から取得したレース数: %d", len(all_race_ids))
 
-    # DB に未登録のレースだけ対象にする
-    existing_ids = db.get_existing_race_ids(all_race_ids)
-    missing_ids = [rid for rid in all_race_ids if rid not in existing_ids]
-    logger.info("未登録レース数: %d（スキップ: %d）", len(missing_ids), len(existing_ids))
+        # DB に未登録のレースだけ対象にする
+        existing_ids = db.get_existing_race_ids(all_race_ids)
+        missing_ids = [rid for rid in all_race_ids if rid not in existing_ids]
+        logger.info("未登録レース数: %d（スキップ: %d）", len(missing_ids), len(existing_ids))
 
-    for i, race_id in enumerate(missing_ids, start=1):
-        logger.info("[%d/%d] レース %s を取得中...", i, len(missing_ids), race_id)
-        try:
-            scrape_race(race_id)
-        except Exception:
-            logger.exception("レース %s の取得に失敗しました。スキップします。", race_id)
+        for i, race_id in enumerate(missing_ids, start=1):
+            logger.info("[%d/%d] レース %s を取得中...", i, len(missing_ids), race_id)
+            try:
+                html = client.get_race(race_id)
+                race_info = race_parser.parse_race_info(html)
+                results = race_parser.parse(html)
+                payoffs = race_parser.parse_payoff(html)
+                db.save_race(race_id, race_info, results, payoffs)
+            except Exception:
+                logger.exception("レース %s の取得に失敗しました。スキップします。", race_id)
 
 
 def main() -> None:
