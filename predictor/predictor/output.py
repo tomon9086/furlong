@@ -41,7 +41,13 @@ def _mark_recommended(pred_df: pd.DataFrame) -> pd.DataFrame:
 def print_prediction(pred_df: pd.DataFrame) -> None:
     """予測結果を標準出力に表示する。"""
     df = _mark_recommended(pred_df)
-    display_cols = ["horse_number", "win_prob", "place_prob", "predicted_rank", "recommended"]
+    display_cols = [
+        "horse_number",
+        "win_prob",
+        "place_prob",
+        "predicted_rank",
+        "recommended",
+    ]
     if "horse_name" in df.columns:
         display_cols.insert(1, "horse_name")
     if "ev" in df.columns:
@@ -69,7 +75,9 @@ def print_prediction(pred_df: pd.DataFrame) -> None:
             print(f"    三連複: {top3[0]}-{top3[1]}-{top3[2]}")
 
 
-def save_csv(pred_df: pd.DataFrame, race_id: str, output_dir: Path = _OUTPUT_DIR) -> None:
+def save_csv(
+    pred_df: pd.DataFrame, race_id: str, output_dir: Path = _OUTPUT_DIR
+) -> None:
     """予測結果を CSV ファイルに保存する。"""
     df = _mark_recommended(pred_df)
     output_dir.mkdir(parents=True, exist_ok=True)
