@@ -18,7 +18,9 @@ def evaluate(test_df: pd.DataFrame, pred_df: pd.DataFrame) -> dict[str, float]:
         place_logloss  : 複勝モデルの log-loss
     """
     merged = test_df[["race_id", "horse_number", "is_win", "is_placed", "odds"]].merge(
-        pred_df[["race_id", "horse_number", "win_prob", "place_prob", "predicted_rank"]],
+        pred_df[
+            ["race_id", "horse_number", "win_prob", "place_prob", "predicted_rank"]
+        ],
         on=["race_id", "horse_number"],
     )
 
@@ -62,9 +64,7 @@ def evaluate_by_popularity(
         popularity_tier : 人気帯別集計（1番人気 / 2-3番 / 4-6番 / 7番以下）
         odds_tier       : オッズ帯別集計（〜1.9倍 / 2-4倍 / 5-9倍 / 10倍以上）
     """
-    merged = test_df[
-        ["race_id", "horse_number", "is_win", "odds", "popularity"]
-    ].merge(
+    merged = test_df[["race_id", "horse_number", "is_win", "odds", "popularity"]].merge(
         pred_df[["race_id", "horse_number", "win_prob"]],
         on=["race_id", "horse_number"],
     )
