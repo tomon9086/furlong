@@ -201,8 +201,10 @@ class TestComputeRecentStats:
         expected_cols = [
             "avg_finish_last3", "best_finish_last3", "avg_last3f_last3",
             "avg_finish_last5", "best_finish_last5", "avg_last3f_last5",
+            "avg_corner_last3", "avg_corner_last5",
             "avg_finish_last3_cond", "best_finish_last3_cond", "avg_last3f_last3_cond",
             "avg_finish_last5_cond", "best_finish_last5_cond", "avg_last3f_last5_cond",
+            "avg_corner_last3_cond", "avg_corner_last5_cond",
         ]
         for col in expected_cols:
             assert col in result.columns, f"{col} が結果に含まれていません"
