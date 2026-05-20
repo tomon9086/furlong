@@ -257,3 +257,15 @@ class Database:
                     (horse_ids,),
                 )
                 return {row[0] for row in cur.fetchall()}
+
+    def get_existing_race_ids(self, race_ids: list[str]) -> set[str]:
+        """指定されたレースIDのうち、すでに DB に登録済みのものを返す."""
+        if not race_ids:
+            return set()
+        with psycopg.connect(self._database_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT race_id FROM races WHERE race_id = ANY(%s)",
+                    (race_ids,),
+                )
+                return {row[0] for row in cur.fetchall()}
