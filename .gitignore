@@ -46,3 +46,6 @@ postgres_data/
 
 # ML models (binary files - managed locally)
 predictor/models/
+
+# Prediction output
+output/
