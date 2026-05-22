@@ -75,6 +75,24 @@ class HorseProfile(TypedDict, total=False):
     母父: str
 
 
+class JockeyProfile(TypedDict, total=False):
+    """騎手プロフィール情報."""
+
+    騎手名: str
+    所属: str
+    生年月日: str
+    初免許年: str
+
+
+class TrainerProfile(TypedDict, total=False):
+    """調教師プロフィール情報."""
+
+    調教師名: str
+    所属: str
+    生年月日: str
+    初免許年: str
+
+
 class HorseRaceResult(TypedDict, total=False):
     """馬の競走成績の1行."""
 

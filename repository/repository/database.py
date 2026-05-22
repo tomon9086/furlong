@@ -7,7 +7,7 @@ from datetime import datetime
 
 import psycopg
 
-from .models import HorseProfile, PayoffRow, RaceDetailRow, RaceInfo
+from .models import HorseProfile, JockeyProfile, PayoffRow, RaceDetailRow, RaceInfo, TrainerProfile
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +245,98 @@ class Database:
                 )
 
         logger.info("馬 %s (%s) を保存", horse_id, profile.get("馬名"))
+
+    def save_jockey(self, jockey_id: str, profile: JockeyProfile) -> None:
+        """騎手情報を保存（upsert）."""
+        now = datetime.now()
+        with psycopg.connect(self._database_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO jockeys (
+                        jockey_id, jockey_name, affiliation,
+                        birthday, first_license_year,
+                        raw_data, created_at, updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (jockey_id) DO UPDATE SET
+                        jockey_name = EXCLUDED.jockey_name,
+                        affiliation = EXCLUDED.affiliation,
+                        birthday = EXCLUDED.birthday,
+                        first_license_year = EXCLUDED.first_license_year,
+                        raw_data = EXCLUDED.raw_data,
+                        updated_at = EXCLUDED.updated_at
+                    """,
+                    (
+                        jockey_id,
+                        _or_none(profile.get("騎手名")),
+                        _or_none(profile.get("所属")),
+                        _or_none(profile.get("生年月日")),
+                        _or_none(profile.get("初免許年")),
+                        json.dumps(dict(profile), ensure_ascii=False),
+                        now,
+                        now,
+                    ),
+                )
+
+        logger.info("騎手 %s (%s) を保存", jockey_id, profile.get("騎手名"))
+
+    def save_trainer(self, trainer_id: str, profile: TrainerProfile) -> None:
+        """調教師情報を保存（upsert）."""
+        now = datetime.now()
+        with psycopg.connect(self._database_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO trainers (
+                        trainer_id, trainer_name, affiliation,
+                        birthday, first_license_year,
+                        raw_data, created_at, updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (trainer_id) DO UPDATE SET
+                        trainer_name = EXCLUDED.trainer_name,
+                        affiliation = EXCLUDED.affiliation,
+                        birthday = EXCLUDED.birthday,
+                        first_license_year = EXCLUDED.first_license_year,
+                        raw_data = EXCLUDED.raw_data,
+                        updated_at = EXCLUDED.updated_at
+                    """,
+                    (
+                        trainer_id,
+                        _or_none(profile.get("調教師名")),
+                        _or_none(profile.get("所属")),
+                        _or_none(profile.get("生年月日")),
+                        _or_none(profile.get("初免許年")),
+                        json.dumps(dict(profile), ensure_ascii=False),
+                        now,
+                        now,
+                    ),
+                )
+
+        logger.info("調教師 %s (%s) を保存", trainer_id, profile.get("調教師名"))
+
+    def get_existing_jockey_ids(self, jockey_ids: list[str]) -> set[str]:
+        """指定された騎手IDのうち、すでに DB に登録済みのものを返す."""
+        if not jockey_ids:
+            return set()
+        with psycopg.connect(self._database_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT jockey_id FROM jockeys WHERE jockey_id = ANY(%s)",
+                    (jockey_ids,),
+                )
+                return {row[0] for row in cur.fetchall()}
+
+    def get_existing_trainer_ids(self, trainer_ids: list[str]) -> set[str]:
+        """指定された調教師IDのうち、すでに DB に登録済みのものを返す."""
+        if not trainer_ids:
+            return set()
+        with psycopg.connect(self._database_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT trainer_id FROM trainers WHERE trainer_id = ANY(%s)",
+                    (trainer_ids,),
+                )
+                return {row[0] for row in cur.fetchall()}
 
     def get_existing_horse_ids(self, horse_ids: list[str]) -> set[str]:
         """指定された馬IDのうち、すでに DB に登録済みのものを返す."""
