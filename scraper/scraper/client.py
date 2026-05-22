@@ -86,7 +86,9 @@ class NetkeibaClient:
         for attempt in range(self.max_retries + 1):
             if attempt > 0:
                 wait = self.request_interval * (2 ** (attempt - 1))
-                logger.debug("リトライ %d/%d: %.1f秒待機", attempt, self.max_retries, wait)
+                logger.debug(
+                    "リトライ %d/%d: %.1f秒待機", attempt, self.max_retries, wait
+                )
                 time.sleep(wait)
 
             # レートリミット
@@ -101,9 +103,13 @@ class NetkeibaClient:
 
                 if response.status_code in _RETRY_STATUS:
                     last_exc = httpx.HTTPStatusError(
-                        f"{response.status_code}", request=response.request, response=response
+                        f"{response.status_code}",
+                        request=response.request,
+                        response=response,
                     )
-                    logger.warning("ステータスコード %d、リトライします", response.status_code)
+                    logger.warning(
+                        "ステータスコード %d、リトライします", response.status_code
+                    )
                     continue
 
                 response.raise_for_status()
@@ -114,7 +120,12 @@ class NetkeibaClient:
                 last_exc = e
                 if attempt >= self.max_retries:
                     raise
-                logger.warning("リクエストエラー: %s (試行 %d/%d)", e, attempt + 1, self.max_retries + 1)
+                logger.warning(
+                    "リクエストエラー: %s (試行 %d/%d)",
+                    e,
+                    attempt + 1,
+                    self.max_retries + 1,
+                )
 
         if last_exc is not None:
             raise last_exc

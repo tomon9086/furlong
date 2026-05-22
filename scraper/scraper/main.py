@@ -214,7 +214,9 @@ def main() -> None:
         print("  mode=horse             例: python -m scraper horse 2019105806")
         print("  mode=shutuba           例: python -m scraper shutuba 202506050801")
         print("  mode=shutuba_upcoming  例: python -m scraper shutuba_upcoming")
-        print("                             python -m scraper shutuba_upcoming 2026 5 23")
+        print(
+            "                             python -m scraper shutuba_upcoming 2026 5 23"
+        )
         print("  mode=backfill          例: python -m scraper backfill 2026 1")
         print("  mode=incremental       例: python -m scraper incremental")
         print("                             python -m scraper incremental 2026 5")
