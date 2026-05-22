@@ -28,7 +28,7 @@
 
 - [x] `scrape_incremental()` 関数を `scraper/main.py` に追加（手動実行もできるよう開始日を引数でオーバーライド可能に）
 - [x] `scrape_shutuba_upcoming()` 関数を `scraper/main.py` に追加（翌日の未取得出馬表を検索して保存）
-- [ ] APScheduler で2つのバッチを 14:00 / 22:00 に呼び出す `scraper/scraper/scheduler.py` を実装
+- [x] APScheduler で2つのバッチを 14:00 / 22:00 に呼び出す `scraper/scraper/scheduler.py` を実装
 - [ ] `docker-compose.yml` に scraper デーモンサービスを追加
 - [ ] 騎手・調教師パーサーを実装して補完フローに組み込む（後回し可）
 
