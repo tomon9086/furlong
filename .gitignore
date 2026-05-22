@@ -49,3 +49,6 @@ predictor/models/
 
 # Prediction output
 output/
+
+# DB backup data
+backup/data/
