@@ -3,7 +3,7 @@
 import logging
 import os
 import sys
-from datetime import date
+from datetime import date, timedelta
 
 from dotenv import load_dotenv
 
@@ -166,15 +166,58 @@ def scrape_incremental(start_date: date | None = None) -> None:
             month += 1
 
 
+def scrape_shutuba_upcoming(target_date: date | None = None) -> None:
+    """翌日（または指定日）の未取得出馬表を検索して保存する.
+
+    Args:
+        target_date: 取得対象日を指定する場合に渡す（手動実行用）。
+                     省略時は翌日の出馬表を取得する。
+    """
+    if target_date is None:
+        target_date = date.today() + timedelta(days=1)
+
+    kaisai_date = target_date.strftime("%Y%m%d")
+    logger.info("%s の出馬表を取得します。", kaisai_date)
+
+    list_parser = RaceListParser()
+    db = Database(DATABASE_URL)
+
+    with NetkeibaClient() as client:
+        html = client.get_race_list_by_date(kaisai_date)
+        race_ids = list_parser.parse_by_date(html)
+
+    logger.info("%s のレース数: %d", kaisai_date, len(race_ids))
+    if not race_ids:
+        logger.info("対象レースが見つかりませんでした。")
+        return
+
+    existing_ids = db.get_existing_race_ids(race_ids)
+    missing_ids = [rid for rid in race_ids if rid not in existing_ids]
+    logger.info(
+        "未取得出馬表: %d件（スキップ: %d件）", len(missing_ids), len(existing_ids)
+    )
+
+    for i, race_id in enumerate(missing_ids, start=1):
+        logger.info("[%d/%d] 出馬表 %s を取得中...", i, len(missing_ids), race_id)
+        try:
+            scrape_shutuba(race_id)
+        except Exception:
+            logger.exception(
+                "出馬表 %s の取得に失敗しました。スキップします。", race_id
+            )
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print("使用方法: python -m scraper <mode> [args...]")
-        print("  mode=race        例: python -m scraper race 202506050801")
-        print("  mode=horse       例: python -m scraper horse 2019105806")
-        print("  mode=shutuba     例: python -m scraper shutuba 202506050801")
-        print("  mode=backfill    例: python -m scraper backfill 2026 1")
-        print("  mode=incremental 例: python -m scraper incremental")
-        print("                      python -m scraper incremental 2026 5")
+        print("  mode=race              例: python -m scraper race 202506050801")
+        print("  mode=horse             例: python -m scraper horse 2019105806")
+        print("  mode=shutuba           例: python -m scraper shutuba 202506050801")
+        print("  mode=shutuba_upcoming  例: python -m scraper shutuba_upcoming")
+        print("                             python -m scraper shutuba_upcoming 2026 5 23")
+        print("  mode=backfill          例: python -m scraper backfill 2026 1")
+        print("  mode=incremental       例: python -m scraper incremental")
+        print("                             python -m scraper incremental 2026 5")
         sys.exit(1)
 
     mode = sys.argv[1]
@@ -194,6 +237,12 @@ def main() -> None:
             print("使用方法: python -m scraper shutuba <race_id>")
             sys.exit(1)
         scrape_shutuba(sys.argv[2])
+    elif mode == "shutuba_upcoming":
+        if len(sys.argv) >= 5:
+            target = date(int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]))
+            scrape_shutuba_upcoming(target_date=target)
+        else:
+            scrape_shutuba_upcoming()
     elif mode == "backfill":
         if len(sys.argv) < 4:
             print("使用方法: python -m scraper backfill <year> <month>")

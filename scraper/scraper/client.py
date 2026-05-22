@@ -70,6 +70,15 @@ class NetkeibaClient:
         url = f"{_RACE_BASE_URL}/race/shutuba.html?race_id={race_id}"
         return self._get(url)
 
+    def get_race_list_by_date(self, kaisai_date: str) -> str:
+        """開催日指定でレース一覧ページを取得してHTMLを返す (race.netkeiba.com).
+
+        Args:
+            kaisai_date: 開催日 (YYYYMMDD 形式)
+        """
+        url = f"{_RACE_BASE_URL}/top/race_list.html?kaisai_date={kaisai_date}"
+        return self._get(url)
+
     def _get(self, url: str) -> str:
         """レートリミット・リトライ付きHTTP GETリクエスト."""
         last_exc: Exception | None = None

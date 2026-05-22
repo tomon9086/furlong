@@ -57,3 +57,20 @@ class RaceListParser(BaseParser):
                 max_page = max(max_page, int(text))
 
         return max_page
+
+    def parse_by_date(self, html: str) -> list[str]:
+        """race.netkeiba.com の開催日別レース一覧ページからレースIDを取得する.
+
+        race_id=XXXXXXXXXXXX 形式のリンクを抽出する。
+        """
+        soup = self.parse_html(html)
+        race_ids: list[str] = []
+
+        for a in soup.find_all("a", href=re.compile(r"race_id=\d{12}")):
+            m = re.search(r"race_id=(\d{12})", a["href"])
+            if m:
+                race_id = m.group(1)
+                if race_id not in race_ids:
+                    race_ids.append(race_id)
+
+        return race_ids
