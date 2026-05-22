@@ -45,3 +45,10 @@
 - [ ] `predictor/Dockerfile` を作成（FastAPI + uvicorn で起動）
 - [ ] `scraper/Dockerfile` を作成（APScheduler デーモンとして起動）
 
+## DB バックアップ
+
+- [ ] `backup/backup.sh` を作成（`pg_dump | gzip` → `/backup/` に保存、7日以上古いファイルを削除）
+- [ ] `backup/crontab` を作成（`0 3 * * * /backup.sh`）
+- [ ] `backup/Dockerfile` を作成（`postgres:16-alpine` ベース、crontab を組み込む）
+- [ ] `docker-compose.prod.yml` に `backup` サービスを追加
+

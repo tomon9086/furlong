@@ -85,6 +85,16 @@ uv run --package furlong-predictor python -m predictor.main train
 uv run --package furlong-predictor python -m predictor.main predict <race_id>
 ```
 
+## バックアップ
+
+```bash
+# 手動バックアップ（本番環境で実行）
+docker compose -f docker-compose.prod.yml run --rm backup /backup.sh
+```
+
+バックアップファイルは `./backup/` ディレクトリに `furlong_YYYYMMDD_HHMMSS.sql.gz` の形式で保存される。
+定期実行は毎日深夜3:00（crond による自動実行）。
+
 ## テスト
 
 ```bash
