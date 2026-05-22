@@ -291,6 +291,20 @@ def scrape_shutuba_upcoming(target_date: date | None = None) -> None:
             )
 
 
+def scrape_incremental_cli() -> None:
+    """scrape-incremental コマンドのエントリポイント.
+
+    使用方法:
+        uv run scrape-incremental
+        uv run scrape-incremental 2026 5
+    """
+    if len(sys.argv) >= 3:
+        start = date(int(sys.argv[1]), int(sys.argv[2]), 1)
+        scrape_incremental(start_date=start)
+    else:
+        scrape_incremental()
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print("使用方法: python -m scraper <mode> [args...]")
