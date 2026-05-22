@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 from .client import NetkeibaClient
 from repository import Database
-from .parsers import HorseParser, RaceDetailParser, RaceListParser, ShutsubaParser
+from .parsers import HorseParser, JockeyParser, RaceDetailParser, RaceListParser, ShutsubaParser, TrainerParser
 
 load_dotenv()
 
@@ -22,17 +22,20 @@ logger = logging.getLogger(__name__)
 def scrape_race(race_id: str) -> None:
     """指定レースIDのレースページをスクレイピングして DB に保存する."""
     parser = RaceDetailParser()
+    db = Database(DATABASE_URL)
 
     with NetkeibaClient() as client:
         logger.info("レース %s を取得中...", race_id)
         html = client.get_race(race_id)
 
-    race_info = parser.parse_race_info(html)
-    results = parser.parse(html)
-    payoffs = parser.parse_payoff(html)
+        race_info = parser.parse_race_info(html)
+        results = parser.parse(html)
+        payoffs = parser.parse_payoff(html)
 
-    db = Database(DATABASE_URL)
-    db.save_race(race_id, race_info, results, payoffs)
+        db.save_race(race_id, race_info, results, payoffs)
+
+        # 未登録騎手・調教師を自動補完
+        _supplement_jockeys_and_trainers(results, db, client)
 
 
 def scrape_horse(horse_id: str) -> None:
@@ -49,6 +52,76 @@ def scrape_horse(horse_id: str) -> None:
     db.save_horse(horse_id, profile)
 
 
+def scrape_jockey(jockey_id: str) -> None:
+    """指定騎手IDの騎手ページをスクレイピングして DB に保存する."""
+    parser = JockeyParser()
+
+    with NetkeibaClient() as client:
+        logger.info("騎手 %s を取得中...", jockey_id)
+        html = client.get_jockey(jockey_id)
+
+    profile = parser.parse(html)
+
+    db = Database(DATABASE_URL)
+    db.save_jockey(jockey_id, profile)
+
+
+def scrape_trainer(trainer_id: str) -> None:
+    """指定調教師IDの調教師ページをスクレイピングして DB に保存する."""
+    parser = TrainerParser()
+
+    with NetkeibaClient() as client:
+        logger.info("調教師 %s を取得中...", trainer_id)
+        html = client.get_trainer(trainer_id)
+
+    profile = parser.parse(html)
+
+    db = Database(DATABASE_URL)
+    db.save_trainer(trainer_id, profile)
+
+
+def _supplement_jockeys_and_trainers(
+    rows: list,
+    db: "Database",
+    client: "NetkeibaClient",
+) -> None:
+    """rows に含まれる騎手・調教師のうち未登録のものを補完する."""
+    jockey_ids = list(dict.fromkeys(row["騎手ID"] for row in rows if row.get("騎手ID")))
+    trainer_ids = list(dict.fromkeys(row["調教師ID"] for row in rows if row.get("調教師ID")))
+
+    if jockey_ids:
+        existing_jockey_ids = db.get_existing_jockey_ids(jockey_ids)
+        missing_jockey_ids = [jid for jid in jockey_ids if jid not in existing_jockey_ids]
+        if missing_jockey_ids:
+            logger.info(
+                "未登録騎手 %d 名を補完します: %s", len(missing_jockey_ids), missing_jockey_ids
+            )
+            jockey_parser = JockeyParser()
+            for jockey_id in missing_jockey_ids:
+                try:
+                    html = client.get_jockey(jockey_id)
+                    profile = jockey_parser.parse(html)
+                    db.save_jockey(jockey_id, profile)
+                except Exception:
+                    logger.exception("騎手 %s の取得に失敗しました。スキップします。", jockey_id)
+
+    if trainer_ids:
+        existing_trainer_ids = db.get_existing_trainer_ids(trainer_ids)
+        missing_trainer_ids = [tid for tid in trainer_ids if tid not in existing_trainer_ids]
+        if missing_trainer_ids:
+            logger.info(
+                "未登録調教師 %d 名を補完します: %s", len(missing_trainer_ids), missing_trainer_ids
+            )
+            trainer_parser = TrainerParser()
+            for trainer_id in missing_trainer_ids:
+                try:
+                    html = client.get_trainer(trainer_id)
+                    profile = trainer_parser.parse(html)
+                    db.save_trainer(trainer_id, profile)
+                except Exception:
+                    logger.exception("調教師 %s の取得に失敗しました。スキップします。", trainer_id)
+
+
 def scrape_shutuba(race_id: str) -> None:
     """指定レースIDの出馬表をスクレイピングして DB に保存する.
 
@@ -56,27 +129,37 @@ def scrape_shutuba(race_id: str) -> None:
     """
     parser = ShutsubaParser()
 
+    db = Database(DATABASE_URL)
+
     with NetkeibaClient() as client:
         logger.info("出馬表 %s を取得中...", race_id)
         html = client.get_shutuba(race_id)
 
-    race_info = parser.parse_race_info(html)
-    rows = parser.parse(html)
+        race_info = parser.parse_race_info(html)
+        rows = parser.parse(html)
 
-    db = Database(DATABASE_URL)
-    db.save_race(race_id, race_info, rows)
+        db.save_race(race_id, race_info, rows)
 
-    # 未登録馬を自動補完
-    horse_ids = [row["馬ID"] for row in rows if row.get("馬ID")]
-    existing_ids = db.get_existing_horse_ids(horse_ids)
-    missing_ids = [hid for hid in horse_ids if hid not in existing_ids]
+        # 未登録馬を自動補完
+        horse_ids = [row["馬ID"] for row in rows if row.get("馬ID")]
+        existing_horse_ids = db.get_existing_horse_ids(horse_ids)
+        missing_horse_ids = [hid for hid in horse_ids if hid not in existing_horse_ids]
 
-    if missing_ids:
-        logger.info("未登録馬 %d 頭を補完します: %s", len(missing_ids), missing_ids)
-        for horse_id in missing_ids:
-            scrape_horse(horse_id)
-    else:
-        logger.info("全馬登録済み。補完不要。")
+        if missing_horse_ids:
+            logger.info("未登録馬 %d 頭を補完します: %s", len(missing_horse_ids), missing_horse_ids)
+            horse_parser = HorseParser()
+            for horse_id in missing_horse_ids:
+                try:
+                    horse_html = client.get_horse(horse_id)
+                    profile, _ = horse_parser.parse(horse_html)
+                    db.save_horse(horse_id, profile)
+                except Exception:
+                    logger.exception("馬 %s の取得に失敗しました。スキップします。", horse_id)
+        else:
+            logger.info("全馬登録済み。補完不要。")
+
+        # 未登録騎手・調教師を自動補完
+        _supplement_jockeys_and_trainers(rows, db, client)
 
 
 def scrape_backfill(year: int, month: int) -> None:
@@ -120,6 +203,7 @@ def scrape_backfill(year: int, month: int) -> None:
                 results = race_parser.parse(html)
                 payoffs = race_parser.parse_payoff(html)
                 db.save_race(race_id, race_info, results, payoffs)
+                _supplement_jockeys_and_trainers(results, db, client)
             except Exception:
                 logger.exception(
                     "レース %s の取得に失敗しました。スキップします。", race_id
@@ -212,6 +296,8 @@ def main() -> None:
         print("使用方法: python -m scraper <mode> [args...]")
         print("  mode=race              例: python -m scraper race 202506050801")
         print("  mode=horse             例: python -m scraper horse 2019105806")
+        print("  mode=jockey            例: python -m scraper jockey 05212")
+        print("  mode=trainer           例: python -m scraper trainer 01120")
         print("  mode=shutuba           例: python -m scraper shutuba 202506050801")
         print("  mode=shutuba_upcoming  例: python -m scraper shutuba_upcoming")
         print(
@@ -234,6 +320,16 @@ def main() -> None:
             print("使用方法: python -m scraper horse <horse_id>")
             sys.exit(1)
         scrape_horse(sys.argv[2])
+    elif mode == "jockey":
+        if len(sys.argv) < 3:
+            print("使用方法: python -m scraper jockey <jockey_id>")
+            sys.exit(1)
+        scrape_jockey(sys.argv[2])
+    elif mode == "trainer":
+        if len(sys.argv) < 3:
+            print("使用方法: python -m scraper trainer <trainer_id>")
+            sys.exit(1)
+        scrape_trainer(sys.argv[2])
     elif mode == "shutuba":
         if len(sys.argv) < 3:
             print("使用方法: python -m scraper shutuba <race_id>")

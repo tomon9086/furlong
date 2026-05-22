@@ -65,6 +65,16 @@ class NetkeibaClient:
         url = f"{_BASE_URL}/horse/{horse_id}/"
         return self._get(url)
 
+    def get_jockey(self, jockey_id: str) -> str:
+        """騎手プロフィールページを取得してHTMLを返す."""
+        url = f"{_BASE_URL}/jockey/profile/{jockey_id}/"
+        return self._get(url)
+
+    def get_trainer(self, trainer_id: str) -> str:
+        """調教師プロフィールページを取得してHTMLを返す."""
+        url = f"{_BASE_URL}/trainer/profile/{trainer_id}/"
+        return self._get(url)
+
     def get_shutuba(self, race_id: str) -> str:
         """出馬表ページを取得してHTMLを返す."""
         url = f"{_RACE_BASE_URL}/race/shutuba.html?race_id={race_id}"
