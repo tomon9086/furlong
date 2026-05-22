@@ -14,7 +14,7 @@ _RACE_BASE_URL = "https://race.netkeiba.com"
 _USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 _REQUEST_INTERVAL = 3.0
 _TIMEOUT = 30
-_MAX_RETRIES = 3
+_MAX_RETRIES = 20
 _RETRY_STATUS = {429, 500, 502, 503, 504}
 
 
@@ -97,7 +97,7 @@ class NetkeibaClient:
             if attempt > 0:
                 wait = self.request_interval * (2 ** (attempt - 1))
                 logger.debug(
-                    "リトライ %d/%d: %.1f秒待機", attempt, self.max_retries, wait
+                    "リトライ %d/%d: %d秒待機", attempt, self.max_retries, wait
                 )
                 time.sleep(wait)
 
