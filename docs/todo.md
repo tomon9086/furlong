@@ -52,3 +52,17 @@
 - [x] `backup/Dockerfile` を作成（`postgres:16-alpine` ベース、crontab を組み込む）
 - [x] `docker-compose.prod.yml` に `backup` サービスを追加
 
+## 馬データ欠損の修正（scrape_race / scrape_backfill）
+
+### コード修正（再発防止）
+
+- [ ] `repository/database.py` に `get_existing_horse_ids(horse_ids)` メソッドを追加
+- [ ] `scraper/main.py` に `_supplement_horses(rows, db, client)` ヘルパーを実装
+- [ ] `scrape_race` から `_supplement_horses` を呼び出すよう修正
+- [ ] `scrape_backfill` から `_supplement_horses` を呼び出すよう修正
+
+### 遡及修正（既存データの補完）
+
+- [ ] `race_results` に存在するが `horses` テーブルに未登録の `horse_id` を洗い出す SQL を確認
+- [ ] 未登録馬を1頭ずつスクレイプして補完する遡及スクリプトを実装・実行する
+
