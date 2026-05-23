@@ -310,6 +310,8 @@ def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFra
         "last_3f",
         "horse_number",
         "bracket_number",
+        "horse_weight",
+        "horse_weight_diff",
     ):
         df[col] = pd.to_numeric(df[col], errors="coerce")
 

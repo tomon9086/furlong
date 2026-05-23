@@ -1,7 +1,7 @@
 """DB 欠損チェックスクリプト.
 
 使い方:
-    uv run python tools/check_missing.py
+    uv run --package furlong-scraper python -m scraper.check_missing
 
 環境変数:
     DATABASE_URL  PostgreSQL 接続文字列（例: postgresql://user:pass@localhost:5432/furlong）
@@ -11,8 +11,6 @@ import os
 import sys
 
 import psycopg
-
-DATABASE_URL = os.environ["DATABASE_URL"]
 
 # --------------------------------------------------------------------------- #
 # クエリ定義
@@ -112,7 +110,13 @@ def _print_check(
 
 
 def main() -> None:
-    with psycopg.connect(DATABASE_URL) as conn:
+    try:
+        database_url = os.environ["DATABASE_URL"]
+    except KeyError:
+        print("環境変数 DATABASE_URL が設定されていません。", file=sys.stderr)
+        sys.exit(1)
+
+    with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
             cur.execute(_Q1_HORSE)
             rows1 = cur.fetchall()
@@ -130,12 +134,8 @@ def main() -> None:
             rows5 = cur.fetchall()
 
     c1 = _print_check("1. 馬マスタ欠損", rows1, ["horse_id", "horse_name", "race_id"])
-    c2 = _print_check(
-        "2. 騎手マスタ欠損", rows2, ["jockey_id", "jockey_name", "race_id"]
-    )
-    c3 = _print_check(
-        "3. 調教師マスタ欠損", rows3, ["trainer_id", "trainer_name", "race_id"]
-    )
+    c2 = _print_check("2. 騎手マスタ欠損", rows2, ["jockey_id", "jockey_name", "race_id"])
+    c3 = _print_check("3. 調教師マスタ欠損", rows3, ["trainer_id", "trainer_name", "race_id"])
     c4 = _print_check("4. レース結果欠落", rows4, ["race_id", "race_name", "date"])
     c5 = _print_check("5. 払い戻し欠落", rows5, ["race_id", "race_name", "date"])
 
@@ -148,8 +148,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyError as e:
-        print(f"環境変数 {e} が設定されていません。", file=sys.stderr)
-        sys.exit(1)
+    main()
