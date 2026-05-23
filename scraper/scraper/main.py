@@ -41,6 +41,9 @@ def scrape_race(race_id: str) -> None:
 
         db.save_race(race_id, race_info, results, payoffs)
 
+        # 未登録馬を自動補完
+        _supplement_horses(results, db, client)
+
         # 未登録騎手・調教師を自動補完
         _supplement_jockeys_and_trainers(results, db, client)
 
@@ -85,6 +88,38 @@ def scrape_trainer(trainer_id: str) -> None:
 
     db = Database(DATABASE_URL)
     db.save_trainer(trainer_id, profile)
+
+
+def _supplement_horses(
+    rows: list,
+    db: "Database",
+    client: "NetkeibaClient",
+) -> None:
+    """rows に含まれる馬のうち未登録のものを補完する."""
+    horse_ids = list(dict.fromkeys(row["馬ID"] for row in rows if row.get("馬ID")))
+    if not horse_ids:
+        return
+
+    existing_horse_ids = db.get_existing_horse_ids(horse_ids)
+    missing_horse_ids = [hid for hid in horse_ids if hid not in existing_horse_ids]
+
+    if not missing_horse_ids:
+        logger.info("全馬登録済み。補完不要。")
+        return
+
+    logger.info(
+        "未登録馬 %d 頭を補完します: %s",
+        len(missing_horse_ids),
+        missing_horse_ids,
+    )
+    horse_parser = HorseParser()
+    for horse_id in missing_horse_ids:
+        try:
+            html = client.get_horse(horse_id)
+            profile, _ = horse_parser.parse(html)
+            db.save_horse(horse_id, profile)
+        except Exception:
+            logger.exception("馬 %s の取得に失敗しました。スキップします。", horse_id)
 
 
 def _supplement_jockeys_and_trainers(
@@ -230,6 +265,7 @@ def scrape_backfill(year: int, month: int) -> None:
                 results = race_parser.parse(html)
                 payoffs = race_parser.parse_payoff(html)
                 db.save_race(race_id, race_info, results, payoffs)
+                _supplement_horses(results, db, client)
                 _supplement_jockeys_and_trainers(results, db, client)
             except Exception:
                 logger.exception(
