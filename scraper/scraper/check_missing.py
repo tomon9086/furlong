@@ -11,6 +11,9 @@ import os
 import sys
 
 import psycopg
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # --------------------------------------------------------------------------- #
 # クエリ定義
