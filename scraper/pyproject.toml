@@ -23,6 +23,7 @@ dev = [
 [project.scripts]
 scraper = "scraper.main:main"
 scrape-incremental = "scraper.main:scrape_incremental_cli"
+backfill-missing = "scraper.backfill_missing:main"
 
 [build-system]
 requires = ["hatchling"]
