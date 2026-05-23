@@ -105,7 +105,9 @@ def backfill_races(
             db.save_race(race_id, race_info, results, payoffs)
             ok += 1
         except Exception:
-            logger.exception("レース %s の取得に失敗しました。スキップします。", race_id)
+            logger.exception(
+                "レース %s の取得に失敗しました。スキップします。", race_id
+            )
             fail += 1
     return ok, fail
 
@@ -157,7 +159,9 @@ def backfill_jockeys(
             db.save_jockey(jockey_id, profile)
             ok += 1
         except Exception:
-            logger.exception("騎手 %s の取得に失敗しました。スキップします。", jockey_id)
+            logger.exception(
+                "騎手 %s の取得に失敗しました。スキップします。", jockey_id
+            )
             fail += 1
     return ok, fail
 
@@ -196,7 +200,9 @@ def backfill_trainers(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="未登録の馬・騎手・調教師・レース結果を遡及補完する")
+    parser = argparse.ArgumentParser(
+        description="未登録の馬・騎手・調教師・レース結果を遡及補完する"
+    )
     parser.add_argument(
         "--horses-only",
         action="store_true",
@@ -211,7 +217,9 @@ def main() -> None:
         sys.exit(1)
 
     with psycopg.connect(database_url) as conn:
-        race_ids = _fetch_missing_ids(conn, _Q_MISSING_RACES) if not args.horses_only else []
+        race_ids = (
+            _fetch_missing_ids(conn, _Q_MISSING_RACES) if not args.horses_only else []
+        )
         horse_ids = _fetch_missing_ids(conn, _Q_MISSING_HORSES)
         if not args.horses_only:
             jockey_ids = _fetch_missing_ids(conn, _Q_MISSING_JOCKEYS)
