@@ -64,7 +64,6 @@ FROM races r
 WHERE NOT EXISTS (
     SELECT 1 FROM race_results rr
     WHERE rr.race_id = r.race_id
-      AND rr.finishing_position ~ '^[0-9]+$'
 )
   AND TO_DATE(r.date, 'YYYY/MM/DD') < CURRENT_DATE
 ORDER BY r.date DESC
