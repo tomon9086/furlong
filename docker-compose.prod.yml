@@ -59,6 +59,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       PGHOST: db
       RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+      RETENTION_COUNT: ${BACKUP_RETENTION_COUNT:-3}
     volumes:
       - backup_data:/backup
     depends_on:
