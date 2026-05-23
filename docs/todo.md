@@ -56,7 +56,7 @@
 
 ### コード修正（再発防止）
 
-- [ ] `repository/database.py` に `get_existing_horse_ids(horse_ids)` メソッドを追加
+- [x] `repository/database.py` に `get_existing_horse_ids(horse_ids)` メソッドを追加
 - [ ] `scraper/main.py` に `_supplement_horses(rows, db, client)` ヘルパーを実装
 - [ ] `scrape_race` から `_supplement_horses` を呼び出すよう修正
 - [ ] `scrape_backfill` から `_supplement_horses` を呼び出すよう修正
