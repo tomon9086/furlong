@@ -9,6 +9,8 @@ dependencies = [
     "scikit-learn>=1.4",
     "lightgbm>=4.3",
     "furlong-repository",
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.29",
 ]
 
 [tool.uv.sources]
