@@ -1,0 +1,155 @@
+"""DB 欠損チェックスクリプト.
+
+使い方:
+    uv run python tools/check_missing.py
+
+環境変数:
+    DATABASE_URL  PostgreSQL 接続文字列（例: postgresql://user:pass@localhost:5432/furlong）
+"""
+
+import os
+import sys
+
+import psycopg
+
+DATABASE_URL = os.environ["DATABASE_URL"]
+
+# --------------------------------------------------------------------------- #
+# クエリ定義
+# --------------------------------------------------------------------------- #
+
+_Q1_HORSE = """
+SELECT DISTINCT
+    rr.horse_id,
+    rr.horse_name,
+    rr.race_id
+FROM race_results rr
+WHERE rr.horse_id IS NOT NULL
+  AND rr.horse_id <> ''
+  AND rr.horse_id NOT IN (SELECT horse_id FROM horses)
+ORDER BY rr.horse_id
+"""
+
+_Q2_JOCKEY = """
+SELECT DISTINCT
+    rr.jockey_id,
+    rr.jockey_name,
+    rr.race_id
+FROM race_results rr
+WHERE rr.jockey_id IS NOT NULL
+  AND rr.jockey_id <> ''
+  AND rr.jockey_id NOT IN (SELECT jockey_id FROM jockeys)
+ORDER BY rr.jockey_id
+"""
+
+_Q3_TRAINER = """
+SELECT DISTINCT
+    rr.trainer_id,
+    rr.trainer_name,
+    rr.race_id
+FROM race_results rr
+WHERE rr.trainer_id IS NOT NULL
+  AND rr.trainer_id <> ''
+  AND rr.trainer_id NOT IN (SELECT trainer_id FROM trainers)
+ORDER BY rr.trainer_id
+"""
+
+_Q4_RACE_RESULTS = """
+SELECT r.race_id, r.race_name, r.date
+FROM races r
+WHERE NOT EXISTS (
+    SELECT 1 FROM race_results rr
+    WHERE rr.race_id = r.race_id
+      AND rr.finishing_position ~ '^[0-9]+$'
+)
+  AND TO_DATE(r.date, 'YYYY/MM/DD') < CURRENT_DATE
+ORDER BY r.date DESC
+"""
+
+_Q5_PAYOFFS = """
+SELECT r.race_id, r.race_name, r.date
+FROM races r
+WHERE EXISTS (
+    SELECT 1 FROM race_results rr
+    WHERE rr.race_id = r.race_id
+      AND rr.finishing_position ~ '^[0-9]+$'
+)
+  AND NOT EXISTS (
+    SELECT 1 FROM payoffs p
+    WHERE p.race_id = r.race_id
+)
+ORDER BY r.date DESC
+"""
+
+# --------------------------------------------------------------------------- #
+# 出力ヘルパー
+# --------------------------------------------------------------------------- #
+
+
+def _print_check(
+    title: str,
+    rows: list[tuple],
+    col_labels: list[str],
+) -> int:
+    """チェック結果を整形して標準出力に書き出す。件数を返す。"""
+    count = len(rows)
+    print(f"=== {title} ===")
+    print(f"件数: {count} 件")
+    if count == 0:
+        print("OK")
+    else:
+        print("サンプル（最大10件）:")
+        for row in rows[:10]:
+            parts = [f"{label}={val}" for label, val in zip(col_labels, row)]
+            print("  " + "  ".join(parts))
+    print()
+    return count
+
+
+# --------------------------------------------------------------------------- #
+# メイン
+# --------------------------------------------------------------------------- #
+
+
+def main() -> None:
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute(_Q1_HORSE)
+            rows1 = cur.fetchall()
+
+            cur.execute(_Q2_JOCKEY)
+            rows2 = cur.fetchall()
+
+            cur.execute(_Q3_TRAINER)
+            rows3 = cur.fetchall()
+
+            cur.execute(_Q4_RACE_RESULTS)
+            rows4 = cur.fetchall()
+
+            cur.execute(_Q5_PAYOFFS)
+            rows5 = cur.fetchall()
+
+    c1 = _print_check("1. 馬マスタ欠損", rows1, ["horse_id", "horse_name", "race_id"])
+    c2 = _print_check(
+        "2. 騎手マスタ欠損", rows2, ["jockey_id", "jockey_name", "race_id"]
+    )
+    c3 = _print_check(
+        "3. 調教師マスタ欠損", rows3, ["trainer_id", "trainer_name", "race_id"]
+    )
+    c4 = _print_check("4. レース結果欠落", rows4, ["race_id", "race_name", "date"])
+    c5 = _print_check("5. 払い戻し欠落", rows5, ["race_id", "race_name", "date"])
+
+    print("=== サマリ ===")
+    print(f"1. 馬マスタ欠損:       {c1:>6} 件")
+    print(f"2. 騎手マスタ欠損:     {c2:>6} 件")
+    print(f"3. 調教師マスタ欠損:   {c3:>6} 件")
+    print(f"4. レース結果欠落:     {c4:>6} 件")
+    print(f"5. 払い戻し欠落:       {c5:>6} 件")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyError as e:
+        print(f"環境変数 {e} が設定されていません。", file=sys.stderr)
+        sys.exit(1)

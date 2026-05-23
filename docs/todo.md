@@ -66,3 +66,24 @@
 - [ ] `race_results` に存在するが `horses` テーブルに未登録の `horse_id` を洗い出す SQL を確認
 - [ ] 未登録馬を1頭ずつスクレイプして補完する遡及スクリプトを実装・実行する
 
+---
+
+## DB 欠損チェックスクリプト
+
+### 事前決定事項（実装前に判断）
+
+- [x] チェック4（レース結果欠落）で「今日より前の日付に限定」する条件を付けるか判断する → **付ける**（`TO_DATE(r.date, 'YYYY/MM/DD') < CURRENT_DATE`）
+- [x] DB 接続方法を決定する（`repository` パッケージの `Database` クラス vs `psycopg` 直接利用） → **`psycopg` 直接利用**
+
+### 実装
+
+- [x] `tools/` ディレクトリを作成する
+- [x] `tools/check_missing.py` を実装する（DB接続・各クエリ実行・結果フォーマット出力）
+  - チェック1: `race_results.horse_id` が `horses` に存在しないケース
+  - チェック2: `race_results.jockey_id` が `jockeys` に存在しないケース
+  - チェック3: `race_results.trainer_id` が `trainers` に存在しないケース
+  - チェック4: 結果確定レースで `race_results` が存在しないケース
+  - チェック5: 結果確定レースで `payoffs` が存在しないケース
+  - 件数・サンプル10件・サマリの出力形式を実装
+- [x] 動作確認する（`uv run python tools/check_missing.py`）
+
