@@ -7,7 +7,14 @@ from datetime import datetime
 
 import psycopg
 
-from .models import HorseProfile, JockeyProfile, PayoffRow, RaceDetailRow, RaceInfo, TrainerProfile
+from .models import (
+    HorseProfile,
+    JockeyProfile,
+    PayoffRow,
+    RaceDetailRow,
+    RaceInfo,
+    TrainerProfile,
+)
 
 logger = logging.getLogger(__name__)
 

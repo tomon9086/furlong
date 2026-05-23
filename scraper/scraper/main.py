@@ -9,7 +9,14 @@ from dotenv import load_dotenv
 
 from .client import NetkeibaClient
 from repository import Database
-from .parsers import HorseParser, JockeyParser, RaceDetailParser, RaceListParser, ShutsubaParser, TrainerParser
+from .parsers import (
+    HorseParser,
+    JockeyParser,
+    RaceDetailParser,
+    RaceListParser,
+    ShutsubaParser,
+    TrainerParser,
+)
 
 load_dotenv()
 
@@ -87,14 +94,20 @@ def _supplement_jockeys_and_trainers(
 ) -> None:
     """rows に含まれる騎手・調教師のうち未登録のものを補完する."""
     jockey_ids = list(dict.fromkeys(row["騎手ID"] for row in rows if row.get("騎手ID")))
-    trainer_ids = list(dict.fromkeys(row["調教師ID"] for row in rows if row.get("調教師ID")))
+    trainer_ids = list(
+        dict.fromkeys(row["調教師ID"] for row in rows if row.get("調教師ID"))
+    )
 
     if jockey_ids:
         existing_jockey_ids = db.get_existing_jockey_ids(jockey_ids)
-        missing_jockey_ids = [jid for jid in jockey_ids if jid not in existing_jockey_ids]
+        missing_jockey_ids = [
+            jid for jid in jockey_ids if jid not in existing_jockey_ids
+        ]
         if missing_jockey_ids:
             logger.info(
-                "未登録騎手 %d 名を補完します: %s", len(missing_jockey_ids), missing_jockey_ids
+                "未登録騎手 %d 名を補完します: %s",
+                len(missing_jockey_ids),
+                missing_jockey_ids,
             )
             jockey_parser = JockeyParser()
             for jockey_id in missing_jockey_ids:
@@ -103,14 +116,20 @@ def _supplement_jockeys_and_trainers(
                     profile = jockey_parser.parse(html)
                     db.save_jockey(jockey_id, profile)
                 except Exception:
-                    logger.exception("騎手 %s の取得に失敗しました。スキップします。", jockey_id)
+                    logger.exception(
+                        "騎手 %s の取得に失敗しました。スキップします。", jockey_id
+                    )
 
     if trainer_ids:
         existing_trainer_ids = db.get_existing_trainer_ids(trainer_ids)
-        missing_trainer_ids = [tid for tid in trainer_ids if tid not in existing_trainer_ids]
+        missing_trainer_ids = [
+            tid for tid in trainer_ids if tid not in existing_trainer_ids
+        ]
         if missing_trainer_ids:
             logger.info(
-                "未登録調教師 %d 名を補完します: %s", len(missing_trainer_ids), missing_trainer_ids
+                "未登録調教師 %d 名を補完します: %s",
+                len(missing_trainer_ids),
+                missing_trainer_ids,
             )
             trainer_parser = TrainerParser()
             for trainer_id in missing_trainer_ids:
@@ -119,7 +138,9 @@ def _supplement_jockeys_and_trainers(
                     profile = trainer_parser.parse(html)
                     db.save_trainer(trainer_id, profile)
                 except Exception:
-                    logger.exception("調教師 %s の取得に失敗しました。スキップします。", trainer_id)
+                    logger.exception(
+                        "調教師 %s の取得に失敗しました。スキップします。", trainer_id
+                    )
 
 
 def scrape_shutuba(race_id: str) -> None:
@@ -146,7 +167,11 @@ def scrape_shutuba(race_id: str) -> None:
         missing_horse_ids = [hid for hid in horse_ids if hid not in existing_horse_ids]
 
         if missing_horse_ids:
-            logger.info("未登録馬 %d 頭を補完します: %s", len(missing_horse_ids), missing_horse_ids)
+            logger.info(
+                "未登録馬 %d 頭を補完します: %s",
+                len(missing_horse_ids),
+                missing_horse_ids,
+            )
             horse_parser = HorseParser()
             for horse_id in missing_horse_ids:
                 try:
@@ -154,7 +179,9 @@ def scrape_shutuba(race_id: str) -> None:
                     profile, _ = horse_parser.parse(horse_html)
                     db.save_horse(horse_id, profile)
                 except Exception:
-                    logger.exception("馬 %s の取得に失敗しました。スキップします。", horse_id)
+                    logger.exception(
+                        "馬 %s の取得に失敗しました。スキップします。", horse_id
+                    )
         else:
             logger.info("全馬登録済み。補完不要。")
 
