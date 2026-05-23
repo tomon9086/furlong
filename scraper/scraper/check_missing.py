@@ -20,38 +20,38 @@ load_dotenv()
 # --------------------------------------------------------------------------- #
 
 _Q1_HORSE = """
-SELECT DISTINCT
+SELECT
     rr.horse_id,
-    rr.horse_name,
-    rr.race_id
+    MIN(rr.horse_name) AS horse_name
 FROM race_results rr
 WHERE rr.horse_id IS NOT NULL
   AND rr.horse_id <> ''
   AND rr.horse_id NOT IN (SELECT horse_id FROM horses)
+GROUP BY rr.horse_id
 ORDER BY rr.horse_id
 """
 
 _Q2_JOCKEY = """
-SELECT DISTINCT
+SELECT
     rr.jockey_id,
-    rr.jockey_name,
-    rr.race_id
+    MIN(rr.jockey_name) AS jockey_name
 FROM race_results rr
 WHERE rr.jockey_id IS NOT NULL
   AND rr.jockey_id <> ''
   AND rr.jockey_id NOT IN (SELECT jockey_id FROM jockeys)
+GROUP BY rr.jockey_id
 ORDER BY rr.jockey_id
 """
 
 _Q3_TRAINER = """
-SELECT DISTINCT
+SELECT
     rr.trainer_id,
-    rr.trainer_name,
-    rr.race_id
+    MIN(rr.trainer_name) AS trainer_name
 FROM race_results rr
 WHERE rr.trainer_id IS NOT NULL
   AND rr.trainer_id <> ''
   AND rr.trainer_id NOT IN (SELECT trainer_id FROM trainers)
+GROUP BY rr.trainer_id
 ORDER BY rr.trainer_id
 """
 
@@ -136,9 +136,9 @@ def main() -> None:
             cur.execute(_Q5_PAYOFFS)
             rows5 = cur.fetchall()
 
-    c1 = _print_check("1. 馬マスタ欠損", rows1, ["horse_id", "horse_name", "race_id"])
-    c2 = _print_check("2. 騎手マスタ欠損", rows2, ["jockey_id", "jockey_name", "race_id"])
-    c3 = _print_check("3. 調教師マスタ欠損", rows3, ["trainer_id", "trainer_name", "race_id"])
+    c1 = _print_check("1. 馬マスタ欠損", rows1, ["horse_id", "horse_name"])
+    c2 = _print_check("2. 騎手マスタ欠損", rows2, ["jockey_id", "jockey_name"])
+    c3 = _print_check("3. 調教師マスタ欠損", rows3, ["trainer_id", "trainer_name"])
     c4 = _print_check("4. レース結果欠落", rows4, ["race_id", "race_name", "date"])
     c5 = _print_check("5. 払い戻し欠落", rows5, ["race_id", "race_name", "date"])
 
