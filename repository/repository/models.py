@@ -93,6 +93,13 @@ class TrainerProfile(TypedDict, total=False):
     初免許年: str
 
 
+class PreRaceOddsRow(TypedDict, total=False):
+    """事前オッズ（締切前スクレイプ）の1行（馬ごと）."""
+
+    馬番: str
+    単勝オッズ: str
+
+
 class HorseRaceResult(TypedDict, total=False):
     """馬の競走成績の1行."""
 

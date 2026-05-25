@@ -80,6 +80,11 @@ class NetkeibaClient:
         url = f"{_RACE_BASE_URL}/race/shutuba.html?race_id={race_id}"
         return self._get(url)
 
+    def get_odds(self, race_id: str) -> str:
+        """単勝オッズページを取得してHTMLを返す."""
+        url = f"{_RACE_BASE_URL}/odds/index.html?race_id={race_id}"
+        return self._get(url)
+
     def get_race_list_by_date(self, kaisai_date: str) -> str:
         """開催日指定でレース一覧ページを取得してHTMLを返す (race.netkeiba.com).
 
