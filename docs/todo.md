@@ -12,7 +12,7 @@
 
 - [x] 事前オッズの保存先を設計する（確定オッズ `race_results.odds` と分離し、**学習には渡さない**方針を spec.md に記録）
 - [x] `scraper`: 締切前（前日／当日朝）オッズページのパーサを追加（`scraper/scraper/parsers/` に odds パーサ）
-- [ ] `scraper`: 事前オッズ取得コマンドを `scraper/scraper/main.py` に追加（例 `python -m scraper odds <race_id>`）し、`repository` に保存メソッドを追加
+- [x] `scraper`: 事前オッズ取得コマンドを `scraper/scraper/main.py` に追加（例 `python -m scraper odds <race_id>`）し、`repository` に保存メソッドを追加
 - [ ] `db/schema.sql` に事前オッズ用のカラム／テーブルを追加
 - [ ] `predictor`: `load_predict_data`（`preprocessing.py`）で事前オッズを join し、predict 経路へ渡す
 - [ ] 対象レースで `predict` を実行し、`output.py` の `ev` が NaN でなくなり単勝推奨が出ることを確認
