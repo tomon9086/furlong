@@ -18,7 +18,10 @@ def _mark_recommended(pred_df: pd.DataFrame) -> pd.DataFrame:
     """
     df = pred_df.copy()
 
-    if "odds" in df.columns:
+    if "win_odds" in df.columns:
+        df["win_odds"] = pd.to_numeric(df["win_odds"], errors="coerce")
+        df["ev"] = df["win_prob"] * df["win_odds"]
+    elif "odds" in df.columns:
         df["odds"] = pd.to_numeric(df["odds"], errors="coerce")
         df["ev"] = df["win_prob"] * df["odds"]
 

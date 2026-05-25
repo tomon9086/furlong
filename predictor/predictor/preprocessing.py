@@ -180,6 +180,12 @@ WHERE rr.finishing_position ~ '^[0-9]+$'
 GROUP BY rr.jockey_id
 """
 
+_PRE_RACE_ODDS_QUERY = """
+SELECT horse_number, win_odds
+FROM pre_race_odds
+WHERE race_id = %s
+"""
+
 _TRAINER_WIN_RATE_QUERY = """
 SELECT
   trainer_id,
@@ -251,10 +257,16 @@ def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
             trainer_cols = [desc[0] for desc in cur.description]
             trainer_df = pd.DataFrame(trainer_rows, columns=trainer_cols)
 
+            cur.execute(_PRE_RACE_ODDS_QUERY, (race_id,))
+            pre_odds_rows = cur.fetchall()
+            pre_odds_cols = [desc[0] for desc in cur.description]
+            pre_odds_df = pd.DataFrame(pre_odds_rows, columns=pre_odds_cols)
+
     return (
         target_df.merge(stats_df, on="horse_id", how="left")
         .merge(jockey_df, on="jockey_id", how="left")
         .merge(trainer_df, on="trainer_id", how="left")
+        .merge(pre_odds_df, on="horse_number", how="left")
     )
 
 

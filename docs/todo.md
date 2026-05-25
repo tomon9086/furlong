@@ -14,7 +14,7 @@
 - [x] `scraper`: 締切前（前日／当日朝）オッズページのパーサを追加（`scraper/scraper/parsers/` に odds パーサ）
 - [x] `scraper`: 事前オッズ取得コマンドを `scraper/scraper/main.py` に追加（例 `python -m scraper odds <race_id>`）し、`repository` に保存メソッドを追加
 - [x] `db/schema.sql` に事前オッズ用のカラム／テーブルを追加
-- [ ] `predictor`: `load_predict_data`（`preprocessing.py`）で事前オッズを join し、predict 経路へ渡す
+- [x] `predictor`: `load_predict_data`（`preprocessing.py`）で事前オッズを join し、predict 経路へ渡す
 - [ ] 対象レースで `predict` を実行し、`output.py` の `ev` が NaN でなくなり単勝推奨が出ることを確認
 - [ ] バックテスト（`train_mode` の `ev_filter_analysis`）が確定オッズで稼働していることを確認し、回収率測定の基準とする
 
