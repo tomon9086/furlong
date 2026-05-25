@@ -14,6 +14,7 @@
 | [plan/future-race-prediction.md](./plan/future-race-prediction.md) | 未来レース予想機能（出馬表取得・予測クエリ分離） |
 | [plan/horse-data-supplement.md](./plan/horse-data-supplement.md) | scrape_race / scrape_backfill における馬データの欠損問題 |
 | [plan/prediction-accuracy.md](./plan/prediction-accuracy.md) | DB スキーマ調査メモ・予測精度の問題分析 |
+| [plan/prediction-accuracy-followup.md](./plan/prediction-accuracy-followup.md) | 回収率改善（目標110%）の検討（2026-05-25）。EV最適化・ベット選択・オッズ取得の穴 |
 | [plan/scraper-scheduler.md](./plan/scraper-scheduler.md) | scraper 定期実行機能（APScheduler） |
 | [plan/predictor-api.md](./plan/predictor-api.md) | predictor HTTP API（FastAPI） |
 | [plan/production-deploy.md](./plan/production-deploy.md) | 本番デプロイ構成（docker-compose.prod.yml） |
