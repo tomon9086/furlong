@@ -10,7 +10,7 @@
 
 ### フェーズ1: 事前オッズ取得 → 真の回収率を測定（最優先）
 
-- [ ] 事前オッズの保存先を設計する（確定オッズ `race_results.odds` と分離し、**学習には渡さない**方針を spec.md に記録）
+- [x] 事前オッズの保存先を設計する（確定オッズ `race_results.odds` と分離し、**学習には渡さない**方針を spec.md に記録）
 - [ ] `scraper`: 締切前（前日／当日朝）オッズページのパーサを追加（`scraper/scraper/parsers/` に odds パーサ）
 - [ ] `scraper`: 事前オッズ取得コマンドを `scraper/scraper/main.py` に追加（例 `python -m scraper odds <race_id>`）し、`repository` に保存メソッドを追加
 - [ ] `db/schema.sql` に事前オッズ用のカラム／テーブルを追加

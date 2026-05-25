@@ -107,3 +107,14 @@ CREATE TABLE payoffs (
 );
 
 CREATE INDEX payoffs_race_id_idx ON payoffs (race_id);
+
+CREATE TABLE pre_race_odds (
+    race_id      varchar(20)  NOT NULL,
+    horse_number varchar(5)   NOT NULL,
+    win_odds     numeric(8,1),
+    scraped_at   timestamp    NOT NULL,
+    created_at   timestamp    NOT NULL,
+    PRIMARY KEY (race_id, horse_number)
+);
+
+CREATE INDEX pre_race_odds_race_id_idx ON pre_race_odds (race_id);

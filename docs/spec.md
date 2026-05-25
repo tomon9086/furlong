@@ -62,6 +62,7 @@ furlong/
 | `races` | レースマスタ | 約 55,700件 |
 | `race_results` | レース結果・出走馬情報 | 約 790,000件 |
 | `payoffs` | 払い戻し | 約 587,600件 |
+| `pre_race_odds` | 事前オッズ（締切前スクレイプ） | ― |
 
 ### データ収録期間
 
@@ -178,6 +179,23 @@ furlong/
 | `payout` | varchar(50) | | 払い戻し金額（例: `1,310`） |
 | `popularity` | varchar(20) | | 人気 |
 | `created_at` | timestamp | ✓ | 作成日時 |
+
+#### `pre_race_odds` — 事前オッズ
+
+締切前（前日／当日朝）にスクレイプした暫定単勝オッズ。**EV 計算・買い目選定にのみ使用し、学習の特徴量として使わない**。
+
+> **学習除外方針**：事前オッズを学習特徴量に含めると「市場オッズの模倣」になり、控除率（約20%）分の損失が上限となって回収率が頭打ちになる。EV の算出（`EV = win_prob × pre_race_odds.win_odds`）と買い目フィルタリングの入力としてのみ参照する。確定オッズ（`race_results.odds`）も同様に学習特徴量から除外する。
+
+| カラム | 型 | NOT NULL | 説明 |
+|---|---|---|---|
+| `race_id` | varchar(20) | ✓ | **PK(1/2)**。`races.race_id` 参照 |
+| `horse_number` | varchar(5) | ✓ | **PK(2/2)**。馬番 |
+| `win_odds` | numeric(8,1) | | 単勝オッズ（数値型。EV 計算に使用） |
+| `scraped_at` | timestamp | ✓ | オッズ取得日時（最新スクレイプ時刻） |
+| `created_at` | timestamp | ✓ | 作成日時 |
+
+- PK は `(race_id, horse_number)` で 1 レース × 1 馬 = 1 行。再スクレイプ時は Upsert で上書き。
+- `win_odds` は `varchar` でなく `numeric` で保持し、直接 EV 計算に使える形にする。
 
 ### データソース
 
