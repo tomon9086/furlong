@@ -113,7 +113,9 @@ def predict(models: Models, df: pd.DataFrame) -> pd.DataFrame:
         .astype(int)
     )
 
-    if "odds" in df.columns:
+    if "win_odds" in df.columns:
+        result["win_odds"] = pd.to_numeric(df["win_odds"].values, errors="coerce")
+    elif "odds" in df.columns:
         result["odds"] = pd.to_numeric(df["odds"].values, errors="coerce")
 
     return result
