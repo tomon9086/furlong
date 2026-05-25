@@ -199,6 +199,11 @@ def ev_filter_analysis(
     ``win_prob × odds > threshold`` で絞り込んだ場合の
     的中率・回収率・カバレッジを複数閾値で算出する。
 
+    バックテスト（train_mode）では ``test_df["odds"]`` として
+    確定オッズ（``race_results.odds``）を使用する。これが回収率測定の基準値となる。
+    予測時（predict_mode）では事前オッズ（``pre_race_odds.win_odds``）を使うため、
+    この関数は直接呼ばず ``output.py`` 経由で EV を算出すること。
+
     Parameters
     ----------
     test_df : pd.DataFrame

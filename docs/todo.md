@@ -16,7 +16,7 @@
 - [x] `db/schema.sql` に事前オッズ用のカラム／テーブルを追加
 - [x] `predictor`: `load_predict_data`（`preprocessing.py`）で事前オッズを join し、predict 経路へ渡す
 - [x] 対象レースで `predict` を実行し、`output.py` の `ev` が NaN でなくなり単勝推奨が出ることを確認
-- [ ] バックテスト（`train_mode` の `ev_filter_analysis`）が確定オッズで稼働していることを確認し、回収率測定の基準とする
+- [x] バックテスト（`train_mode` の `ev_filter_analysis`）が確定オッズで稼働していることを確認し、回収率測定の基準とする
 
 ### フェーズ2: 確率較正の可視化（Brier / calibration curve）
 

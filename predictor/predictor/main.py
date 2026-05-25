@@ -54,7 +54,7 @@ def train_mode() -> None:
     print(grade_breakdown.to_string())
 
     ev_analysis = evaluation.ev_filter_analysis(test_df, pred_df)
-    print("--- 期待値フィルタ別 ---")
+    print("--- 期待値フィルタ別（EV基準: 確定オッズ race_results.odds）---")
     print(ev_analysis.to_string())
 
     print("モデルを保存中...")
