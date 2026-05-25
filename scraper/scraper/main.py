@@ -12,6 +12,7 @@ from repository import Database
 from .parsers import (
     HorseParser,
     JockeyParser,
+    OddsParser,
     RaceDetailParser,
     RaceListParser,
     ShutsubaParser,
@@ -46,6 +47,19 @@ def scrape_race(race_id: str) -> None:
 
         # 未登録騎手・調教師を自動補完
         _supplement_jockeys_and_trainers(results, db, client)
+
+
+def scrape_odds(race_id: str) -> None:
+    """指定レースIDの単勝オッズページをスクレイピングして DB に保存する."""
+    parser = OddsParser()
+    db = Database(DATABASE_URL)
+
+    with NetkeibaClient() as client:
+        logger.info("レース %s の単勝オッズを取得中...", race_id)
+        html = client.get_odds(race_id)
+
+    rows = parser.parse(html)
+    db.save_pre_race_odds(race_id, rows)
 
 
 def scrape_horse(horse_id: str) -> None:
@@ -371,6 +385,7 @@ def scrape_incremental_cli() -> None:
 def main() -> None:
     if len(sys.argv) < 2:
         print("使用方法: python -m scraper <mode> [args...]")
+        print("  mode=odds              例: python -m scraper odds 202506050801")
         print("  mode=race              例: python -m scraper race 202506050801")
         print("  mode=horse             例: python -m scraper horse 2019105806")
         print("  mode=jockey            例: python -m scraper jockey 05212")
@@ -387,7 +402,12 @@ def main() -> None:
 
     mode = sys.argv[1]
 
-    if mode == "race":
+    if mode == "odds":
+        if len(sys.argv) < 3:
+            print("使用方法: python -m scraper odds <race_id>")
+            sys.exit(1)
+        scrape_odds(sys.argv[2])
+    elif mode == "race":
         if len(sys.argv) < 3:
             print("使用方法: python -m scraper race <race_id>")
             sys.exit(1)

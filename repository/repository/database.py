@@ -11,6 +11,7 @@ from .models import (
     HorseProfile,
     JockeyProfile,
     PayoffRow,
+    PreRaceOddsRow,
     RaceDetailRow,
     RaceInfo,
     TrainerProfile,
@@ -368,6 +369,60 @@ class Database:
                     (race_ids,),
                 )
                 return {row[0] for row in cur.fetchall()}
+
+    def save_pre_race_odds(
+        self,
+        race_id: str,
+        rows: list[PreRaceOddsRow],
+        scraped_at: datetime | None = None,
+    ) -> None:
+        """事前オッズ（締切前スクレイプ）を保存（upsert）.
+
+        Args:
+            race_id: 対象レースID。
+            rows: OddsParser.parse() の戻り値。
+            scraped_at: スクレイプ日時。省略時は現在時刻を使用。
+        """
+        if not rows:
+            logger.info("レース %s: 事前オッズ行が空のため保存をスキップします。", race_id)
+            return
+
+        now = datetime.now()
+        ts = scraped_at if scraped_at is not None else now
+
+        with psycopg.connect(self._database_url) as conn:
+            with conn.cursor() as cur:
+                for row in rows:
+                    odds_text = row.get("単勝オッズ")
+                    try:
+                        win_odds = float(odds_text) if odds_text else None
+                    except ValueError:
+                        win_odds = None
+
+                    cur.execute(
+                        """
+                        INSERT INTO pre_race_odds (
+                            race_id, horse_number, win_odds,
+                            scraped_at, created_at
+                        ) VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (race_id, horse_number) DO UPDATE SET
+                            win_odds    = EXCLUDED.win_odds,
+                            scraped_at  = EXCLUDED.scraped_at
+                        """,
+                        (
+                            race_id,
+                            _or_none(row.get("馬番")),
+                            win_odds,
+                            ts,
+                            now,
+                        ),
+                    )
+
+        logger.info(
+            "レース %s の事前オッズ %d 件を保存しました。",
+            race_id,
+            len(rows),
+        )
 
     def get_latest_race_date(self) -> tuple[int, int] | None:
         """DB に登録されている最新レースの (year, month) を返す。レースが1件もない場合は None を返す."""
