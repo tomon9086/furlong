@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pandas as pd
-from sklearn.metrics import log_loss
+from sklearn.metrics import brier_score_loss, log_loss
 
 
 def evaluate(test_df: pd.DataFrame, pred_df: pd.DataFrame) -> dict[str, float]:
@@ -16,6 +16,8 @@ def evaluate(test_df: pd.DataFrame, pred_df: pd.DataFrame) -> dict[str, float]:
         recovery_rate  : 単勝回収率（100円×レース数投資して返ってくる割合）
         win_logloss    : 単勝モデルの log-loss
         place_logloss  : 複勝モデルの log-loss
+        win_brier      : 単勝モデルの Brier score
+        place_brier    : 複勝モデルの Brier score
     """
     merged = test_df[["race_id", "horse_number", "is_win", "is_placed", "odds"]].merge(
         pred_df[
@@ -42,11 +44,17 @@ def evaluate(test_df: pd.DataFrame, pred_df: pd.DataFrame) -> dict[str, float]:
     win_logloss = float(log_loss(merged["is_win"], merged["win_prob"]))
     place_logloss = float(log_loss(merged["is_placed"], merged["place_prob"]))
 
+    # Brier score
+    win_brier = float(brier_score_loss(merged["is_win"], merged["win_prob"]))
+    place_brier = float(brier_score_loss(merged["is_placed"], merged["place_prob"]))
+
     return {
         "win_accuracy": win_accuracy,
         "recovery_rate": recovery_rate,
         "win_logloss": win_logloss,
         "place_logloss": place_logloss,
+        "win_brier": win_brier,
+        "place_brier": place_brier,
     }
 
 
