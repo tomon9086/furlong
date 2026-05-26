@@ -58,7 +58,7 @@
 
 ### 事前オッズ自動取得
 
-- [ ] `predict_mode` 実行時に `pre_race_odds` に該当 race_id のデータがなければ `scraper.main odds <race_id>` を自動実行する（`main.py`）
+- [x] `predict_mode` 実行時に `pre_race_odds` に該当 race_id のデータがなければ `scraper.main odds <race_id>` を自動実行する（`main.py`）
 - [ ] オッズ取得に失敗した場合は警告を出して予測は続行する（ev = NaN のまま）
 
 ## predictor HTTP API
