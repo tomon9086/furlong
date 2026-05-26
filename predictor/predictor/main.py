@@ -65,22 +65,33 @@ def train_mode() -> None:
         after = metrics[key]
         diff = after - before
         arrow = "↓改善" if diff < 0 else "↑悪化"
-        print(f"  {key}: 較正前 {before:.4f} → 較正後 {after:.4f}  ({diff:+.4f} {arrow})")
+        print(
+            f"  {key}: 較正前 {before:.4f} → 較正後 {after:.4f}  ({diff:+.4f} {arrow})"
+        )
 
     print("--- calibration curve 較正前後比較（単勝）---")
-    cc_win_raw = calib_raw["win"][["bin_center", "mean_pred", "actual_rate", "count"]].copy()
+    cc_win_raw = calib_raw["win"][
+        ["bin_center", "mean_pred", "actual_rate", "count"]
+    ].copy()
     cc_win_after = calib_after["win"][["mean_pred", "actual_rate"]].rename(
         columns={"mean_pred": "mean_pred_after", "actual_rate": "actual_rate_after"}
     )
-    cc_win_cmp = pd.concat([cc_win_raw.reset_index(drop=True), cc_win_after.reset_index(drop=True)], axis=1)
+    cc_win_cmp = pd.concat(
+        [cc_win_raw.reset_index(drop=True), cc_win_after.reset_index(drop=True)], axis=1
+    )
     print(cc_win_cmp.to_string(index=False))
 
     print("--- calibration curve 較正前後比較（複勝）---")
-    cc_place_raw = calib_raw["place"][["bin_center", "mean_pred", "actual_rate", "count"]].copy()
+    cc_place_raw = calib_raw["place"][
+        ["bin_center", "mean_pred", "actual_rate", "count"]
+    ].copy()
     cc_place_after = calib_after["place"][["mean_pred", "actual_rate"]].rename(
         columns={"mean_pred": "mean_pred_after", "actual_rate": "actual_rate_after"}
     )
-    cc_place_cmp = pd.concat([cc_place_raw.reset_index(drop=True), cc_place_after.reset_index(drop=True)], axis=1)
+    cc_place_cmp = pd.concat(
+        [cc_place_raw.reset_index(drop=True), cc_place_after.reset_index(drop=True)],
+        axis=1,
+    )
     print(cc_place_cmp.to_string(index=False))
 
     print("--- 較正バイアス分析（較正前）---")

@@ -122,7 +122,9 @@ def load_calibrated_models(model_dir: Path = _MODEL_DIR) -> CalibratedModels:
                 raw_win = pickle.load(f)
             with open(place_raw_path, "rb") as f:
                 raw_place = pickle.load(f)
-            return CalibratedModels(win=win, place=place, raw_win=raw_win, raw_place=raw_place)
+            return CalibratedModels(
+                win=win, place=place, raw_win=raw_win, raw_place=raw_place
+            )
 
     raise FileNotFoundError(f"較正済みモデルが見つかりません: {model_dir}")
 

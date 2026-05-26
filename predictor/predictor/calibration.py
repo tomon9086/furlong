@@ -112,7 +112,9 @@ def calibrate_models(
     win_calib = _Calibrator(method).fit(win_raw, calib_df["is_win"].to_numpy())
     place_calib = _Calibrator(method).fit(place_raw, calib_df["is_placed"].to_numpy())
 
-    return CalibratedModels(win=win_calib, place=place_calib, raw_win=models.win, raw_place=models.place)
+    return CalibratedModels(
+        win=win_calib, place=place_calib, raw_win=models.win, raw_place=models.place
+    )
 
 
 def predict_calibrated(
