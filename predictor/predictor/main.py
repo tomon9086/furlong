@@ -36,8 +36,13 @@ def train_mode() -> None:
     print("モデルを学習中...")
     models = model.train(train_df)
 
+    print("確率較正中...")
+    from predictor import calibration
+
+    calibrated = calibration.calibrate_models(models, test_df)
+
     print("評価中...")
-    pred_df = model.predict(models, test_df)
+    pred_df = model.predict(calibrated, test_df)
     metrics = evaluation.evaluate(test_df, pred_df)
     print("--- 評価結果 ---")
     for k, v in metrics.items():
@@ -71,6 +76,7 @@ def train_mode() -> None:
 
     print("モデルを保存中...")
     version_dir = model.save_models(models)
+    model.save_calibrated_models(calibrated, version_dir)
     print(f"完了 ({version_dir.name})")
 
 
@@ -117,7 +123,10 @@ def predict_mode(race_id: str) -> None:
         print(f"レース {race_id} の予測対象行が見つかりません", file=sys.stderr)
         sys.exit(1)
 
-    models = model.load_models()
+    try:
+        models = model.load_calibrated_models()
+    except FileNotFoundError:
+        models = model.load_models()
     pred_df = model.predict(models, target)
 
     output.print_prediction(pred_df)

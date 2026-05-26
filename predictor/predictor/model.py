@@ -10,6 +10,7 @@ from typing import NamedTuple
 import lightgbm as lgb
 import pandas as pd
 
+from predictor.calibration import CalibratedModels
 from predictor.preprocessing import get_feature_columns
 
 _MODEL_DIR = Path(__file__).parent.parent / "models"
@@ -76,6 +77,17 @@ def save_models(
     return version_dir
 
 
+def save_calibrated_models(
+    calibrated: CalibratedModels,
+    version_dir: Path,
+) -> None:
+    """較正済みモデルを指定ディレクトリに保存する。"""
+    with open(version_dir / "win_calibrated.pkl", "wb") as f:
+        pickle.dump(calibrated.win, f)
+    with open(version_dir / "place_calibrated.pkl", "wb") as f:
+        pickle.dump(calibrated.place, f)
+
+
 def load_models(model_dir: Path = _MODEL_DIR) -> Models:
     """保存済みモデルを読み込む（最新のタイムスタンプディレクトリを使用）。"""
     dirs = sorted(d for d in model_dir.iterdir() if d.is_dir())
@@ -90,14 +102,37 @@ def load_models(model_dir: Path = _MODEL_DIR) -> Models:
     return Models(win=win, place=place)
 
 
-def predict(models: Models, df: pd.DataFrame) -> pd.DataFrame:
-    """予測確率と予測着順を付与した DataFrame を返す。"""
-    features = get_feature_columns()
-    available = [f for f in features if f in df.columns]
-    X = df[available].copy()
+def load_calibrated_models(model_dir: Path = _MODEL_DIR) -> CalibratedModels:
+    """保存済み較正済みモデルを読み込む（較正済みファイルが存在する最新ディレクトリを使用）。"""
+    dirs = sorted(d for d in model_dir.iterdir() if d.is_dir())
+    if not dirs:
+        raise FileNotFoundError(f"モデルが見つかりません: {model_dir}")
 
-    win_probs = models.win.predict(X)
-    place_probs = models.place.predict(X)
+    for version_dir in reversed(dirs):
+        win_path = version_dir / "win_calibrated.pkl"
+        place_path = version_dir / "place_calibrated.pkl"
+        if win_path.exists() and place_path.exists():
+            with open(win_path, "rb") as f:
+                win = pickle.load(f)
+            with open(place_path, "rb") as f:
+                place = pickle.load(f)
+            return CalibratedModels(win=win, place=place)
+
+    raise FileNotFoundError(f"較正済みモデルが見つかりません: {model_dir}")
+
+
+def predict(models: Models | CalibratedModels, df: pd.DataFrame) -> pd.DataFrame:
+    """予測確率と予測着順を付与した DataFrame を返す。"""
+    if isinstance(models, CalibratedModels):
+        from predictor.calibration import predict_calibrated
+
+        win_probs, place_probs = predict_calibrated(models, df)
+    else:
+        features = get_feature_columns()
+        available = [f for f in features if f in df.columns]
+        X = df[available].copy()
+        win_probs = models.win.predict(X)
+        place_probs = models.place.predict(X)
 
     result = df[["race_id", "horse_number", "horse_id"]].copy()
     if "horse_name" in df.columns:
