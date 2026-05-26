@@ -18,6 +18,7 @@ def train_mode() -> None:
     from predictor.preprocessing import (
         compute_recent_stats,
         load_data,
+        load_payoffs,
         preprocess,
         split_by_date,
     )
@@ -128,6 +129,16 @@ def train_mode() -> None:
     boot_ci = evaluation.ev_filter_bootstrap_ci(test_df, pred_df)
     if not boot_ci.empty:
         print(boot_ci.to_string())
+
+    print("払戻データを読み込み中...")
+    test_race_ids = test_df["race_id"].unique().tolist()
+    payoffs_df = load_payoffs(DATABASE_URL, test_race_ids)
+    multi_bet = evaluation.multi_bet_recovery_analysis(test_df, pred_df, payoffs_df)
+    print("--- 券種別回収率（複勝・馬連・三連複, payoffs テーブル使用）---")
+    if not multi_bet.empty:
+        print(multi_bet.to_string())
+    else:
+        print("  払戻データなし（payoffs テーブルが空の可能性あり）")
 
     print("--- キャリブレーションカーブ（単勝・較正後）---")
     print(calib_after["win"].to_string(index=False))

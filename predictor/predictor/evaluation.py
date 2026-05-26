@@ -577,3 +577,165 @@ def analyze_calibration_bias(
             "summary": summary,
         }
     return result
+
+
+# ---------------------------------------------------------------------------
+# 券種別回収率評価（payoffs テーブル活用）
+# ---------------------------------------------------------------------------
+
+
+def _normalize_combination(combo: str) -> str:
+    """組合せ文字列を正規化（馬番を昇順ソート）。
+
+    例: ``'7-3'`` → ``'3-7'``, ``'3-1-7'`` → ``'1-3-7'``
+    """
+    parts = [p.strip() for p in str(combo).split("-")]
+    try:
+        parts_int = [int(p) for p in parts]
+        parts_int.sort()
+        return "-".join(str(p) for p in parts_int)
+    except ValueError:
+        return str(combo)
+
+
+def _parse_payout(payout_str: str) -> float:
+    """払戻金額文字列を数値に変換。例: ``'1,310'`` → ``1310.0``"""
+    try:
+        return float(str(payout_str).replace(",", ""))
+    except (ValueError, AttributeError):
+        return float("nan")
+
+
+def multi_bet_recovery_analysis(
+    test_df: pd.DataFrame,
+    pred_df: pd.DataFrame,
+    payoffs_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """単勝以外の券種（複勝・馬連・三連複）の回収率を評価する。
+
+    各レースでモデル予測に基づいて買い目を1点選択し、
+    ``payoffs`` テーブルの実際の払戻と照合して回収率を算出する。
+
+    選択ルール:
+    - 複勝  : place_prob 最大の馬 1 頭
+    - 馬連  : win_prob 上位 2 頭（組合せ1点）
+    - 三連複 : win_prob 上位 3 頭（組合せ1点）
+
+    Parameters
+    ----------
+    test_df : pd.DataFrame
+        テストデータ（race_id, horse_number を含む）
+    pred_df : pd.DataFrame
+        予測結果（race_id, horse_number, win_prob, place_prob を含む）
+    payoffs_df : pd.DataFrame
+        払戻データ（race_id, bet_type, combination, payout を含む）
+
+    Returns
+    -------
+    pd.DataFrame
+        券種別の集計（index: 券種）。
+        カラム: 推奨数・的中数・的中率・回収率
+    """
+    merged = test_df[["race_id", "horse_number"]].merge(
+        pred_df[["race_id", "horse_number", "win_prob", "place_prob"]],
+        on=["race_id", "horse_number"],
+    )
+    # horse_number を整数に統一（組合せ文字列の生成に使用）
+    merged["hn_int"] = (
+        pd.to_numeric(merged["horse_number"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+    )
+
+    # payoffs データを正規化して検索マップを構築
+    payoffs = payoffs_df.copy()
+    payoffs["payout_value"] = payoffs["payout"].apply(_parse_payout)
+    payoffs["combination_norm"] = payoffs["combination"].apply(_normalize_combination)
+    payoff_map: dict[tuple[str, str, str], float] = (
+        payoffs
+        .set_index(["race_id", "bet_type", "combination_norm"])["payout_value"]
+        .to_dict()
+    )
+
+    rows = []
+
+    # --- 複勝 ---
+    place_idx = merged.groupby("race_id")["place_prob"].idxmax()
+    place_picks = merged.loc[place_idx].copy()
+    place_picks["combo_norm"] = place_picks["hn_int"].astype(str)
+    place_picks["payout_val"] = place_picks.apply(
+        lambda r: payoff_map.get((r["race_id"], "複勝", r["combo_norm"]), float("nan")),
+        axis=1,
+    )
+    place_picks["is_hit"] = place_picks["payout_val"].notna()
+    n = len(place_picks)
+    hits = int(place_picks["is_hit"].sum())
+    recovered = float(place_picks["payout_val"].fillna(0).sum())
+    rows.append(
+        {
+            "券種": "複勝",
+            "推奨数": n,
+            "的中数": hits,
+            "的中率": hits / n if n > 0 else float("nan"),
+            "回収率": recovered / (n * 100) if n > 0 else float("nan"),
+        }
+    )
+
+    # --- 馬連 ---
+    quinella_rows: list[dict] = []
+    for race_id, group in merged.groupby("race_id"):
+        top2 = group.nlargest(2, "win_prob")
+        if len(top2) < 2:
+            continue
+        nums = sorted(top2["hn_int"].tolist())
+        combo = f"{nums[0]}-{nums[1]}"
+        payout = payoff_map.get((race_id, "馬連", combo), float("nan"))
+        quinella_rows.append(
+            {"race_id": race_id, "payout": payout, "is_hit": not pd.isna(payout)}
+        )
+    if quinella_rows:
+        qdf = pd.DataFrame(quinella_rows)
+        n = len(qdf)
+        hits = int(qdf["is_hit"].sum())
+        recovered = float(qdf["payout"].fillna(0).sum())
+        rows.append(
+            {
+                "券種": "馬連",
+                "推奨数": n,
+                "的中数": hits,
+                "的中率": hits / n if n > 0 else float("nan"),
+                "回収率": recovered / (n * 100) if n > 0 else float("nan"),
+            }
+        )
+
+    # --- 三連複 ---
+    trio_rows: list[dict] = []
+    for race_id, group in merged.groupby("race_id"):
+        top3 = group.nlargest(3, "win_prob")
+        if len(top3) < 3:
+            continue
+        nums = sorted(top3["hn_int"].tolist())
+        combo = f"{nums[0]}-{nums[1]}-{nums[2]}"
+        payout = payoff_map.get((race_id, "三連複", combo), float("nan"))
+        trio_rows.append(
+            {"race_id": race_id, "payout": payout, "is_hit": not pd.isna(payout)}
+        )
+    if trio_rows:
+        tdf = pd.DataFrame(trio_rows)
+        n = len(tdf)
+        hits = int(tdf["is_hit"].sum())
+        recovered = float(tdf["payout"].fillna(0).sum())
+        rows.append(
+            {
+                "券種": "三連複",
+                "推奨数": n,
+                "的中数": hits,
+                "的中率": hits / n if n > 0 else float("nan"),
+                "回収率": recovered / (n * 100) if n > 0 else float("nan"),
+            }
+        )
+
+    result = pd.DataFrame(rows)
+    if result.empty:
+        return result
+    return result.set_index("券種")

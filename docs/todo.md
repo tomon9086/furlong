@@ -32,7 +32,7 @@
 
 - [x] `ev_filter_analysis`（`evaluation.py`）を「EV閾値 × 人気帯」の2軸グリッドに拡張
 - [x] 回収率の bootstrap 信頼区間を算出する関数を追加（110% が誤差でないかを判定。数千ベット規模が前提）
-- [ ] 単勝以外の券種（複勝・馬連・三連複など）の回収率評価を追加（`payoffs` テーブルを活用）
+- [x] 単勝以外の券種（複勝・馬連・三連複など）の回収率評価を追加（`payoffs` テーブルを活用）
 - [ ] walk-forward（rolling）検証を実装（`split_by_date` を単一分割から複数期間へ）
 - [ ] 最適な「閾値 × 人気帯 × 券種」の組み合わせを実測し [experiments.md](./experiments.md) に記録
 

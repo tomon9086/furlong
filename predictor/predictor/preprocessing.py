@@ -208,6 +208,24 @@ WHERE rn <= 30
 GROUP BY trainer_id
 """
 
+_PAYOFFS_QUERY = """
+SELECT race_id, bet_type, combination, payout
+FROM payoffs
+WHERE race_id = ANY(%s)
+"""
+
+
+def load_payoffs(database_url: str, race_ids: list[str]) -> pd.DataFrame:
+    """指定レースの払戻データを DB から読み込む。"""
+    if not race_ids:
+        return pd.DataFrame(columns=["race_id", "bet_type", "combination", "payout"])
+    with psycopg.connect(database_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(_PAYOFFS_QUERY, (race_ids,))
+            rows = cur.fetchall()
+            cols = [desc[0] for desc in cur.description]
+    return pd.DataFrame(rows, columns=cols)
+
 
 def load_data(database_url: str) -> pd.DataFrame:
     """PostgreSQL からレース・出走馬データを読み込む（学習用）。"""
