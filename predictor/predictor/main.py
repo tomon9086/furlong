@@ -124,6 +124,11 @@ def train_mode() -> None:
     else:
         print(ev_analysis.to_string())
 
+    print("--- 回収率 Bootstrap 信頼区間（EV閾値 × 人気帯, 95%CI）---")
+    boot_ci = evaluation.ev_filter_bootstrap_ci(test_df, pred_df)
+    if not boot_ci.empty:
+        print(boot_ci.to_string())
+
     print("--- キャリブレーションカーブ（単勝・較正後）---")
     print(calib_after["win"].to_string(index=False))
     print("--- キャリブレーションカーブ（複勝・較正後）---")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 from sklearn.metrics import brier_score_loss, log_loss
 
@@ -288,6 +289,168 @@ def ev_filter_analysis(
         if use_popularity:
             for tier in _POP_TIER_ORDER:
                 rows.append(_stats(filtered[filtered["popularity_tier"] == tier], thr, tier))
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    df["人気帯"] = pd.Categorical(df["人気帯"], categories=tier_order, ordered=True)
+    return df.set_index(["threshold", "人気帯"])
+
+
+def bootstrap_recovery_ci(
+    is_win: "pd.Series | np.ndarray",
+    odds: "pd.Series | np.ndarray",
+    n_bootstrap: int = 10_000,
+    ci: float = 0.95,
+    random_state: int | None = None,
+) -> dict[str, float]:
+    """回収率の bootstrap 信頼区間を算出する。
+
+    ベット単位でリサンプリング（復元抽出）し、回収率の分布を推定する。
+    数千ベット規模を想定（n < 500 程度では信頼区間が広くなる）。
+
+    Parameters
+    ----------
+    is_win : array-like
+        的中フラグ（1=的中, 0=外れ）
+    odds : array-like
+        払戻オッズ
+    n_bootstrap : int
+        ブートストラップ試行回数。デフォルト 10000。
+    ci : float
+        信頼区間の幅（例: 0.95 = 95%信頼区間）。
+    random_state : int | None
+        乱数シード。再現性が必要な場合に指定。
+
+    Returns
+    -------
+    dict[str, float]
+        point_estimate : 実データから計算した回収率
+        ci_lower       : 信頼区間下限
+        ci_upper       : 信頼区間上限
+        ci_level       : 信頼水準（例: 0.95）
+        n_bets         : ベット数
+        above_100      : 信頼区間下限 > 1.0（有意にプラス）
+        above_110      : 信頼区間下限 > 1.1（110%以上が誤差でない）
+    """
+    w = np.asarray(is_win, dtype=float)
+    o = np.asarray(odds, dtype=float)
+    n = len(w)
+
+    if n == 0:
+        return {
+            "point_estimate": float("nan"),
+            "ci_lower": float("nan"),
+            "ci_upper": float("nan"),
+            "ci_level": ci,
+            "n_bets": 0,
+            "above_100": False,
+            "above_110": False,
+        }
+
+    # 点推定（実データの回収率）
+    point_estimate = float((w * o).sum() / n)
+
+    # bootstrap
+    rng = np.random.default_rng(random_state)
+    boot_rates = np.empty(n_bootstrap, dtype=float)
+    for i in range(n_bootstrap):
+        idx = rng.integers(0, n, size=n)
+        boot_rates[i] = (w[idx] * o[idx]).mean()
+
+    alpha = 1.0 - ci
+    ci_lower = float(np.percentile(boot_rates, 100 * alpha / 2))
+    ci_upper = float(np.percentile(boot_rates, 100 * (1 - alpha / 2)))
+
+    return {
+        "point_estimate": point_estimate,
+        "ci_lower": ci_lower,
+        "ci_upper": ci_upper,
+        "ci_level": ci,
+        "n_bets": n,
+        "above_100": ci_lower > 1.0,
+        "above_110": ci_lower > 1.1,
+    }
+
+
+def ev_filter_bootstrap_ci(
+    test_df: pd.DataFrame,
+    pred_df: pd.DataFrame,
+    thresholds: list[float] | None = None,
+    n_bootstrap: int = 10_000,
+    ci: float = 0.95,
+    random_state: int | None = None,
+) -> pd.DataFrame:
+    """EV閾値 × 人気帯ごとの回収率 bootstrap 信頼区間を算出する。
+
+    ``ev_filter_analysis`` と同じフィルタリングロジックを用い、
+    各セルの回収率に対して bootstrap 信頼区間を付与する。
+
+    Parameters
+    ----------
+    test_df : pd.DataFrame
+        ``ev_filter_analysis`` と同じ形式のテストデータ
+    pred_df : pd.DataFrame
+        ``ev_filter_analysis`` と同じ形式の予測データ
+    thresholds : list[float] | None
+        EV閾値リスト。None の場合はデフォルト値を使用。
+    n_bootstrap : int
+        ブートストラップ試行回数。デフォルト 10000。
+    ci : float
+        信頼水準。デフォルト 0.95（95%信頼区間）。
+    random_state : int | None
+        乱数シード。
+
+    Returns
+    -------
+    pd.DataFrame
+        MultiIndex（threshold, 人気帯）を持つ DataFrame。
+        カラム: 推奨数・回収率・CI下限・CI上限・有意>100%・有意>110%。
+        人気帯は「全体」「1番人気」「2-3番人気」「4-6番人気」「7番人気以下」。
+        popularity カラムが test_df にない場合は「全体」行のみ。
+    """
+    if thresholds is None:
+        thresholds = [1.0, 1.2, 1.5, 2.0, 3.0]
+
+    use_popularity = "popularity" in test_df.columns
+    test_cols = ["race_id", "horse_number", "is_win", "odds"]
+    if use_popularity:
+        test_cols.append("popularity")
+
+    merged = test_df[test_cols].merge(
+        pred_df[["race_id", "horse_number", "win_prob"]],
+        on=["race_id", "horse_number"],
+    )
+    merged["odds"] = pd.to_numeric(merged["odds"], errors="coerce")
+    merged["ev"] = merged["win_prob"] * merged["odds"]
+
+    if use_popularity:
+        merged["popularity"] = pd.to_numeric(merged["popularity"], errors="coerce")
+        merged["popularity_tier"] = merged["popularity"].map(_pop_tier)
+
+    def _row(df: pd.DataFrame, thr: float, tier: str) -> dict:
+        result = bootstrap_recovery_ci(
+            df["is_win"], df["odds"], n_bootstrap=n_bootstrap, ci=ci, random_state=random_state
+        )
+        return {
+            "threshold": thr,
+            "人気帯": tier,
+            "推奨数": result["n_bets"],
+            "回収率": result["point_estimate"],
+            f"CI下限({int(ci*100)}%)": result["ci_lower"],
+            f"CI上限({int(ci*100)}%)": result["ci_upper"],
+            "有意>100%": result["above_100"],
+            "有意>110%": result["above_110"],
+        }
+
+    tier_order = ["全体"] + _POP_TIER_ORDER
+    rows = []
+    for thr in thresholds:
+        filtered = merged[merged["ev"] > thr]
+        rows.append(_row(filtered, thr, "全体"))
+        if use_popularity:
+            for tier in _POP_TIER_ORDER:
+                rows.append(_row(filtered[filtered["popularity_tier"] == tier], thr, tier))
 
     df = pd.DataFrame(rows)
     if df.empty:
