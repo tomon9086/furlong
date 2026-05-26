@@ -288,7 +288,9 @@ def ev_filter_analysis(
         rows.append(_stats(filtered, thr, "全体"))
         if use_popularity:
             for tier in _POP_TIER_ORDER:
-                rows.append(_stats(filtered[filtered["popularity_tier"] == tier], thr, tier))
+                rows.append(
+                    _stats(filtered[filtered["popularity_tier"] == tier], thr, tier)
+                )
 
     df = pd.DataFrame(rows)
     if df.empty:
@@ -430,7 +432,11 @@ def ev_filter_bootstrap_ci(
 
     def _row(df: pd.DataFrame, thr: float, tier: str) -> dict:
         result = bootstrap_recovery_ci(
-            df["is_win"], df["odds"], n_bootstrap=n_bootstrap, ci=ci, random_state=random_state
+            df["is_win"],
+            df["odds"],
+            n_bootstrap=n_bootstrap,
+            ci=ci,
+            random_state=random_state,
         )
         return {
             "threshold": thr,
@@ -450,7 +456,9 @@ def ev_filter_bootstrap_ci(
         rows.append(_row(filtered, thr, "全体"))
         if use_popularity:
             for tier in _POP_TIER_ORDER:
-                rows.append(_row(filtered[filtered["popularity_tier"] == tier], thr, tier))
+                rows.append(
+                    _row(filtered[filtered["popularity_tier"] == tier], thr, tier)
+                )
 
     df = pd.DataFrame(rows)
     if df.empty:
@@ -503,9 +511,7 @@ def calibration_curve(
             actual_rate=(actual_col, "mean"),
             count=(actual_col, "count"),
         )
-        grouped["bin_center"] = [
-            (iv.left + iv.right) / 2 for iv in grouped.index
-        ]
+        grouped["bin_center"] = [(iv.left + iv.right) / 2 for iv in grouped.index]
         return grouped.reset_index(drop=True)[
             ["bin_center", "mean_pred", "actual_rate", "count"]
         ]
@@ -536,7 +542,7 @@ def analyze_calibration_bias(
             summary          : 人間向けサマリ文字列
     """
     THRESHOLD_BIAS = 0.01  # |signed_bias| がこれを超えたら要較正
-    THRESHOLD_MCE = 0.02   # mean_calib_error がこれを超えたら要較正
+    THRESHOLD_MCE = 0.02  # mean_calib_error がこれを超えたら要較正
 
     result: dict[str, dict] = {}
     for key in ("win", "place"):
@@ -642,20 +648,16 @@ def multi_bet_recovery_analysis(
     )
     # horse_number を整数に統一（組合せ文字列の生成に使用）
     merged["hn_int"] = (
-        pd.to_numeric(merged["horse_number"], errors="coerce")
-        .fillna(0)
-        .astype(int)
+        pd.to_numeric(merged["horse_number"], errors="coerce").fillna(0).astype(int)
     )
 
     # payoffs データを正規化して検索マップを構築
     payoffs = payoffs_df.copy()
     payoffs["payout_value"] = payoffs["payout"].apply(_parse_payout)
     payoffs["combination_norm"] = payoffs["combination"].apply(_normalize_combination)
-    payoff_map: dict[tuple[str, str, str], float] = (
-        payoffs
-        .set_index(["race_id", "bet_type", "combination_norm"])["payout_value"]
-        .to_dict()
-    )
+    payoff_map: dict[tuple[str, str, str], float] = payoffs.set_index(
+        ["race_id", "bet_type", "combination_norm"]
+    )["payout_value"].to_dict()
 
     rows = []
 
@@ -852,9 +854,7 @@ def ev_multi_bet_grid(
     merged["odds"] = pd.to_numeric(merged["odds"], errors="coerce")
     merged["ev"] = merged["win_prob"] * merged["odds"]
     merged["hn_int"] = (
-        pd.to_numeric(merged["horse_number"], errors="coerce")
-        .fillna(0)
-        .astype(int)
+        pd.to_numeric(merged["horse_number"], errors="coerce").fillna(0).astype(int)
     )
 
     if use_popularity:
@@ -865,11 +865,9 @@ def ev_multi_bet_grid(
     payoffs = payoffs_df.copy()
     payoffs["payout_value"] = payoffs["payout"].apply(_parse_payout)
     payoffs["combination_norm"] = payoffs["combination"].apply(_normalize_combination)
-    payoff_map: dict[tuple[str, str, str], float] = (
-        payoffs
-        .set_index(["race_id", "bet_type", "combination_norm"])["payout_value"]
-        .to_dict()
-    )
+    payoff_map: dict[tuple[str, str, str], float] = payoffs.set_index(
+        ["race_id", "bet_type", "combination_norm"]
+    )["payout_value"].to_dict()
 
     bet_types = ["単勝", "複勝", "馬連", "三連複"]
     tier_order = ["全体"] + _POP_TIER_ORDER
@@ -881,16 +879,31 @@ def ev_multi_bet_grid(
         if bet_type == "単勝":
             n = len(sub)
             if n == 0:
-                return {"推奨数": 0, "的中数": 0, "的中率": float("nan"), "回収率": float("nan")}
+                return {
+                    "推奨数": 0,
+                    "的中数": 0,
+                    "的中率": float("nan"),
+                    "回収率": float("nan"),
+                }
             wins = int(sub["is_win"].sum())
             recovered = float((sub["is_win"] * sub["odds"] * 100).sum())
-            return {"推奨数": n, "的中数": wins, "的中率": wins / n, "回収率": recovered / (n * 100)}
+            return {
+                "推奨数": n,
+                "的中数": wins,
+                "的中率": wins / n,
+                "回収率": recovered / (n * 100),
+            }
 
         elif bet_type == "複勝":
             # フィルタ通過馬（1頭）を複勝で購入
             n = len(sub)
             if n == 0:
-                return {"推奨数": 0, "的中数": 0, "的中率": float("nan"), "回収率": float("nan")}
+                return {
+                    "推奨数": 0,
+                    "的中数": 0,
+                    "的中率": float("nan"),
+                    "回収率": float("nan"),
+                }
             hits = 0
             recovered = 0.0
             for _, row in sub.iterrows():
@@ -899,7 +912,12 @@ def ev_multi_bet_grid(
                 if not pd.isna(payout):
                     hits += 1
                     recovered += payout
-            return {"推奨数": n, "的中数": hits, "的中率": hits / n, "回収率": recovered / (n * 100)}
+            return {
+                "推奨数": n,
+                "的中数": hits,
+                "的中率": hits / n,
+                "回収率": recovered / (n * 100),
+            }
 
         elif bet_type == "馬連":
             # フィルタ通過レースで win_prob 上位2頭の馬連1点を購入
@@ -914,12 +932,22 @@ def ev_multi_bet_grid(
                 payout = payoff_map.get((race_id, "馬連", combo), float("nan"))
                 rows_list.append({"payout": payout, "is_hit": not pd.isna(payout)})
             if not rows_list:
-                return {"推奨数": 0, "的中数": 0, "的中率": float("nan"), "回収率": float("nan")}
+                return {
+                    "推奨数": 0,
+                    "的中数": 0,
+                    "的中率": float("nan"),
+                    "回収率": float("nan"),
+                }
             qdf = pd.DataFrame(rows_list)
             n = len(qdf)
             hits = int(qdf["is_hit"].sum())
             recovered = float(qdf["payout"].fillna(0).sum())
-            return {"推奨数": n, "的中数": hits, "的中率": hits / n, "回収率": recovered / (n * 100)}
+            return {
+                "推奨数": n,
+                "的中数": hits,
+                "的中率": hits / n,
+                "回収率": recovered / (n * 100),
+            }
 
         elif bet_type == "三連複":
             # フィルタ通過レースで win_prob 上位3頭の三連複1点を購入
@@ -934,14 +962,29 @@ def ev_multi_bet_grid(
                 payout = payoff_map.get((race_id, "三連複", combo), float("nan"))
                 rows_list.append({"payout": payout, "is_hit": not pd.isna(payout)})
             if not rows_list:
-                return {"推奨数": 0, "的中数": 0, "的中率": float("nan"), "回収率": float("nan")}
+                return {
+                    "推奨数": 0,
+                    "的中数": 0,
+                    "的中率": float("nan"),
+                    "回収率": float("nan"),
+                }
             tdf = pd.DataFrame(rows_list)
             n = len(tdf)
             hits = int(tdf["is_hit"].sum())
             recovered = float(tdf["payout"].fillna(0).sum())
-            return {"推奨数": n, "的中数": hits, "的中率": hits / n, "回収率": recovered / (n * 100)}
+            return {
+                "推奨数": n,
+                "的中数": hits,
+                "的中率": hits / n,
+                "回収率": recovered / (n * 100),
+            }
 
-        return {"推奨数": 0, "的中数": 0, "的中率": float("nan"), "回収率": float("nan")}
+        return {
+            "推奨数": 0,
+            "的中数": 0,
+            "的中率": float("nan"),
+            "回収率": float("nan"),
+        }
 
     rows = []
     for thr in thresholds:
@@ -964,12 +1007,14 @@ def ev_multi_bet_grid(
 
             for bet_type in bet_types:
                 stats = _stats_for_races(race_ids, tier_top1, bet_type)
-                rows.append({
-                    "threshold": thr,
-                    "人気帯": tier,
-                    "券種": bet_type,
-                    **stats,
-                })
+                rows.append(
+                    {
+                        "threshold": thr,
+                        "人気帯": tier,
+                        "券種": bet_type,
+                        **stats,
+                    }
+                )
 
     df = pd.DataFrame(rows)
     if df.empty:
