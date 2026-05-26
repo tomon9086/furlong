@@ -117,7 +117,9 @@ def train_mode() -> None:
     print(grade_breakdown.to_string())
 
     ev_analysis = evaluation.ev_filter_analysis(test_df, pred_df)
-    print("--- 期待値フィルタ別（EV閾値 × 人気帯: 回収率, EV基準: 確定オッズ race_results.odds）---")
+    print(
+        "--- 期待値フィルタ別（EV閾値 × 人気帯: 回収率, EV基準: 確定オッズ race_results.odds）---"
+    )
     if isinstance(ev_analysis.index, pd.MultiIndex):
         for metric in ["回収率", "推奨数", "的中率", "カバレッジ"]:
             if metric in ev_analysis.columns:
@@ -161,10 +163,12 @@ def train_mode() -> None:
     wf_splits = walk_forward_splits(df, n_splits=5)
     fold_results = []
     for fold_idx, (wf_train, wf_test) in enumerate(wf_splits, start=1):
-        print(f"  フォールド {fold_idx}/{len(wf_splits)}: "
-              f"学習 {len(wf_train):,} 行  "
-              f"テスト {len(wf_test):,} 行  "
-              f"({wf_test['date'].min()} 〜 {wf_test['date'].max()})")
+        print(
+            f"  フォールド {fold_idx}/{len(wf_splits)}: "
+            f"学習 {len(wf_train):,} 行  "
+            f"テスト {len(wf_test):,} 行  "
+            f"({wf_test['date'].min()} 〜 {wf_test['date'].max()})"
+        )
         wf_models = model.train(wf_train)
         wf_calibrated = _calib_mod.calibrate_models(wf_models, wf_test)
         wf_pred = model.predict(wf_calibrated, wf_test)
@@ -224,6 +228,22 @@ def predict_mode(race_id: str) -> None:
                 sys.exit(1)
         else:
             sys.exit(1)
+
+    if raw["win_odds"].isna().all():
+        import subprocess
+
+        print(f"レース {race_id} の事前オッズが未取得です。自動取得を試みます...")
+        result = subprocess.run(
+            [sys.executable, "-m", "scraper.main", "odds", race_id],
+            cwd=None,
+        )
+        if result.returncode != 0:
+            print(
+                f"警告: レース {race_id} の事前オッズ取得に失敗しました。EV は NaN のまま予測を続行します。",
+                file=sys.stderr,
+            )
+        else:
+            raw = load_predict_data(DATABASE_URL, race_id)
 
     df = preprocess(raw, keep_null_position=True)
 
