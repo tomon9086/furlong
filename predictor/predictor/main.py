@@ -57,6 +57,12 @@ def train_mode() -> None:
     print("--- 期待値フィルタ別（EV基準: 確定オッズ race_results.odds）---")
     print(ev_analysis.to_string())
 
+    calib = evaluation.calibration_curve(test_df, pred_df)
+    print("--- キャリブレーションカーブ（単勝）---")
+    print(calib["win"].to_string(index=False))
+    print("--- キャリブレーションカーブ（複勝）---")
+    print(calib["place"].to_string(index=False))
+
     print("モデルを保存中...")
     version_dir = model.save_models(models)
     print(f"完了 ({version_dir.name})")
