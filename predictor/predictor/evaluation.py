@@ -274,3 +274,60 @@ def ev_filter_analysis(
         )
 
     return pd.DataFrame(rows).set_index("threshold")
+
+
+def calibration_curve(
+    test_df: pd.DataFrame,
+    pred_df: pd.DataFrame,
+    n_bins: int = 10,
+) -> dict[str, pd.DataFrame]:
+    """予測確率ビン別の実測勝率（キャリブレーションカーブ）を算出する。
+
+    Parameters
+    ----------
+    test_df : pd.DataFrame
+        テストデータ（race_id, horse_number, is_win, is_placed を含む）
+    pred_df : pd.DataFrame
+        予測結果（race_id, horse_number, win_prob, place_prob を含む）
+    n_bins : int
+        確率を分割するビン数。デフォルト 10（等幅）。
+
+    Returns
+    -------
+    dict[str, pd.DataFrame]
+        win   : 単勝モデルのキャリブレーション
+        place : 複勝モデルのキャリブレーション
+
+        各 DataFrame のカラム:
+            bin_center  : ビン中央値（予測確率軸）
+            mean_pred   : ビン内の予測確率の平均
+            actual_rate : ビン内の実際の的中率（実測勝率 / 複勝率）
+            count       : ビン内のサンプル数
+    """
+    merged = test_df[["race_id", "horse_number", "is_win", "is_placed"]].merge(
+        pred_df[["race_id", "horse_number", "win_prob", "place_prob"]],
+        on=["race_id", "horse_number"],
+    )
+
+    def _calc(prob_col: str, actual_col: str) -> pd.DataFrame:
+        labels, _ = pd.cut(
+            merged[prob_col], bins=n_bins, include_lowest=True, retbins=True
+        )
+        tmp = merged[[prob_col, actual_col]].copy()
+        tmp["_bin"] = labels
+        grouped = tmp.groupby("_bin", observed=True).agg(
+            mean_pred=(prob_col, "mean"),
+            actual_rate=(actual_col, "mean"),
+            count=(actual_col, "count"),
+        )
+        grouped["bin_center"] = [
+            (iv.left + iv.right) / 2 for iv in grouped.index
+        ]
+        return grouped.reset_index(drop=True)[
+            ["bin_center", "mean_pred", "actual_rate", "count"]
+        ]
+
+    return {
+        "win": _calc("win_prob", "is_win"),
+        "place": _calc("place_prob", "is_placed"),
+    }
