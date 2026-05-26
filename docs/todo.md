@@ -22,7 +22,7 @@
 
 - [x] `evaluation.py` に Brier score を追加（win / place 両モデル）
 - [x] `evaluation.py` に calibration curve（予測確率ビン別の実測勝率）を算出する関数を追加
-- [ ] `main.py` の `train_mode` 出力に Brier・calibration を組み込む
+- [x] `main.py` の `train_mode` 出力に Brier・calibration を組み込む
 - [ ] 較正のズレ（過信／過小評価）を確認し、必要なら確率較正（Isotonic / Platt）の導入を検討タスク化
 
 ### フェーズ3: EVフィルタ × 券種 × 人気帯のグリッドで回収率最適化
