@@ -111,12 +111,18 @@ def load_calibrated_models(model_dir: Path = _MODEL_DIR) -> CalibratedModels:
     for version_dir in reversed(dirs):
         win_path = version_dir / "win_calibrated.pkl"
         place_path = version_dir / "place_calibrated.pkl"
+        win_raw_path = version_dir / "win_model.pkl"
+        place_raw_path = version_dir / "place_model.pkl"
         if win_path.exists() and place_path.exists():
             with open(win_path, "rb") as f:
                 win = pickle.load(f)
             with open(place_path, "rb") as f:
                 place = pickle.load(f)
-            return CalibratedModels(win=win, place=place)
+            with open(win_raw_path, "rb") as f:
+                raw_win = pickle.load(f)
+            with open(place_raw_path, "rb") as f:
+                raw_place = pickle.load(f)
+            return CalibratedModels(win=win, place=place, raw_win=raw_win, raw_place=raw_place)
 
     raise FileNotFoundError(f"較正済みモデルが見つかりません: {model_dir}")
 

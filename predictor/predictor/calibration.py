@@ -1,55 +1,68 @@
 """確率較正モジュール
 
-CalibratedClassifierCV（Isotonic / Platt）で win / place モデルを後段較正する。
-較正は ``cv="prefit"`` を使用するため、渡すデータは学習に使っていない
-保留セット（テストセット等）であること。
+IsotonicRegression（Isotonic）または LogisticRegression（Platt）で
+win / place モデルを後段較正する。
+
+較正は学習済み LightGBM モデルの生スコアを保留セット（テストセット等）で
+キャリブレータに当てはめることで実行する。
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
 
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
-from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.calibration import CalibratedClassifierCV
+from sklearn.isotonic import IsotonicRegression
+from sklearn.linear_model import LogisticRegression
 
 from predictor.preprocessing import get_feature_columns
 
 if TYPE_CHECKING:
-    import lightgbm as lgb
-
     from predictor.model import Models
 
 
-class _LGBMBoosterWrapper(BaseEstimator, ClassifierMixin):
-    """lgb.Booster を sklearn の ClassifierMixin に準拠させるラッパー。
+class _Calibrator:
+    """生スコア → 較正済み確率 のマッピングを保持するラッパー。
 
-    CalibratedClassifierCV(cv="prefit") で使用するための最小実装。
+    ``method="isotonic"`` の場合は IsotonicRegression、
+    ``method="sigmoid"`` の場合は LogisticRegression（Platt scaling）を使用する。
     """
 
-    def __init__(self, booster: lgb.Booster) -> None:
-        self.booster = booster
-        self.classes_ = np.array([0, 1])
+    def __init__(self, method: str) -> None:
+        if method == "isotonic":
+            self._model = IsotonicRegression(out_of_bounds="clip")
+            self._method = "isotonic"
+        elif method == "sigmoid":
+            self._model = LogisticRegression(C=1.0)
+            self._method = "sigmoid"
+        else:
+            raise ValueError(
+                f"method は 'isotonic' または 'sigmoid' のみ指定可能: {method!r}"
+            )
 
-    def fit(self, X, y):
-        # cv="prefit" では呼ばれない。sklearn API 規約のために定義。
+    def fit(self, raw_probs: np.ndarray, y: np.ndarray) -> "_Calibrator":
+        if self._method == "isotonic":
+            self._model.fit(raw_probs, y)
+        else:
+            self._model.fit(raw_probs.reshape(-1, 1), y)
         return self
 
-    def predict(self, X):
-        proba = self.booster.predict(X)
-        return (proba >= 0.5).astype(int)
-
-    def predict_proba(self, X):
-        proba = self.booster.predict(X)
-        return np.column_stack([1 - proba, proba])
+    def predict(self, raw_probs: np.ndarray) -> np.ndarray:
+        if self._method == "isotonic":
+            return self._model.predict(raw_probs)
+        else:
+            return self._model.predict_proba(raw_probs.reshape(-1, 1))[:, 1]
 
 
 class CalibratedModels(NamedTuple):
-    """較正済みモデルのペア。"""
+    """較正済みモデルのペア（較正器 + 元の LightGBM モデル）。"""
 
-    win: CalibratedClassifierCV
-    place: CalibratedClassifierCV
+    win: _Calibrator
+    place: _Calibrator
+    raw_win: lgb.Booster
+    raw_place: lgb.Booster
 
 
 def _extract_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -66,12 +79,14 @@ def calibrate_models(
 ) -> CalibratedModels:
     """win/place モデルを保留セットで後段較正する。
 
+    学習済み LightGBM モデルの生スコアを保留セットで IsotonicRegression
+    または LogisticRegression（Platt scaling）に当てはめることで後段較正を実現する。
+
     Parameters
     ----------
     models : predictor.model.Models
         学習済み LightGBM モデル（``model.train`` の戻り値）。
-        較正は ``cv="prefit"`` で行うため、``calib_df`` は学習に
-        使っていないデータ（テストセット等）を使うこと。
+        ``calib_df`` は学習に使っていないデータ（テストセット等）を使うこと。
     calib_df : pd.DataFrame
         較正用データ。``is_win`` / ``is_placed`` カラムを含む必要がある。
     method : str
@@ -82,31 +97,22 @@ def calibrate_models(
     Returns
     -------
     CalibratedModels
-        ``win`` / ``place`` それぞれの :class:`CalibratedClassifierCV` インスタンス。
-        ``predict_proba(X)[:, 1]`` で較正済み確率を取得できる。
+        ``win`` / ``place`` それぞれの :class:`_Calibrator` インスタンス。
 
     Raises
     ------
     ValueError
         ``method`` が ``"isotonic"`` / ``"sigmoid"`` 以外の場合。
     """
-    if method not in ("isotonic", "sigmoid"):
-        raise ValueError(
-            f"method は 'isotonic' または 'sigmoid' のみ指定可能: {method!r}"
-        )
-
     X = _extract_features(calib_df)
 
-    win_wrapper = _LGBMBoosterWrapper(models.win)
-    place_wrapper = _LGBMBoosterWrapper(models.place)
+    win_raw = models.win.predict(X)
+    place_raw = models.place.predict(X)
 
-    win_calib = CalibratedClassifierCV(win_wrapper, cv="prefit", method=method)
-    place_calib = CalibratedClassifierCV(place_wrapper, cv="prefit", method=method)
+    win_calib = _Calibrator(method).fit(win_raw, calib_df["is_win"].to_numpy())
+    place_calib = _Calibrator(method).fit(place_raw, calib_df["is_placed"].to_numpy())
 
-    win_calib.fit(X, calib_df["is_win"].to_numpy())
-    place_calib.fit(X, calib_df["is_placed"].to_numpy())
-
-    return CalibratedModels(win=win_calib, place=place_calib)
+    return CalibratedModels(win=win_calib, place=place_calib, raw_win=models.win, raw_place=models.place)
 
 
 def predict_calibrated(
@@ -128,6 +134,8 @@ def predict_calibrated(
         ``(win_probs, place_probs)`` の較正済み確率ベクトル。
     """
     X = _extract_features(df)
-    win_probs: np.ndarray = calibrated.win.predict_proba(X)[:, 1]
-    place_probs: np.ndarray = calibrated.place.predict_proba(X)[:, 1]
+    win_raw: np.ndarray = calibrated.raw_win.predict(X)
+    place_raw: np.ndarray = calibrated.raw_place.predict(X)
+    win_probs = calibrated.win.predict(win_raw)
+    place_probs = calibrated.place.predict(place_raw)
     return win_probs, place_probs

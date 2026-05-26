@@ -12,6 +12,8 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 
 def train_mode() -> None:
     """学習モード: 全データを使ってモデルを学習し保存する。"""
+    import pandas as pd
+
     from predictor import evaluation, model
     from predictor.preprocessing import (
         compute_recent_stats,
@@ -36,17 +38,60 @@ def train_mode() -> None:
     print("モデルを学習中...")
     models = model.train(train_df)
 
+    print("評価中（較正前）...")
+    pred_df_raw = model.predict(models, test_df)
+    metrics_raw = evaluation.evaluate(test_df, pred_df_raw)
+    calib_raw = evaluation.calibration_curve(test_df, pred_df_raw)
+    bias_raw = evaluation.analyze_calibration_bias(calib_raw)
+
     print("確率較正中...")
     from predictor import calibration
 
     calibrated = calibration.calibrate_models(models, test_df)
 
-    print("評価中...")
+    print("評価中（較正後）...")
     pred_df = model.predict(calibrated, test_df)
     metrics = evaluation.evaluate(test_df, pred_df)
+    calib_after = evaluation.calibration_curve(test_df, pred_df)
+    bias_after = evaluation.analyze_calibration_bias(calib_after)
+
     print("--- 評価結果 ---")
     for k, v in metrics.items():
         print(f"  {k}: {v:.4f}")
+
+    print("--- Brier score 較正前後比較 ---")
+    for key in ("win_brier", "place_brier"):
+        before = metrics_raw[key]
+        after = metrics[key]
+        diff = after - before
+        arrow = "↓改善" if diff < 0 else "↑悪化"
+        print(f"  {key}: 較正前 {before:.4f} → 較正後 {after:.4f}  ({diff:+.4f} {arrow})")
+
+    print("--- calibration curve 較正前後比較（単勝）---")
+    cc_win_raw = calib_raw["win"][["bin_center", "mean_pred", "actual_rate", "count"]].copy()
+    cc_win_after = calib_after["win"][["mean_pred", "actual_rate"]].rename(
+        columns={"mean_pred": "mean_pred_after", "actual_rate": "actual_rate_after"}
+    )
+    cc_win_cmp = pd.concat([cc_win_raw.reset_index(drop=True), cc_win_after.reset_index(drop=True)], axis=1)
+    print(cc_win_cmp.to_string(index=False))
+
+    print("--- calibration curve 較正前後比較（複勝）---")
+    cc_place_raw = calib_raw["place"][["bin_center", "mean_pred", "actual_rate", "count"]].copy()
+    cc_place_after = calib_after["place"][["mean_pred", "actual_rate"]].rename(
+        columns={"mean_pred": "mean_pred_after", "actual_rate": "actual_rate_after"}
+    )
+    cc_place_cmp = pd.concat([cc_place_raw.reset_index(drop=True), cc_place_after.reset_index(drop=True)], axis=1)
+    print(cc_place_cmp.to_string(index=False))
+
+    print("--- 較正バイアス分析（較正前）---")
+    for key, b in bias_raw.items():
+        label = "単勝" if key == "win" else "複勝"
+        print(f"  {label}: {b['summary']}")
+
+    print("--- 較正バイアス分析（較正後）---")
+    for key, b in bias_after.items():
+        label = "単勝" if key == "win" else "複勝"
+        print(f"  {label}: {b['summary']}")
 
     breakdown = evaluation.evaluate_by_popularity(test_df, pred_df)
     print("--- 人気帯別 ---")
@@ -62,17 +107,10 @@ def train_mode() -> None:
     print("--- 期待値フィルタ別（EV基準: 確定オッズ race_results.odds）---")
     print(ev_analysis.to_string())
 
-    calib = evaluation.calibration_curve(test_df, pred_df)
-    print("--- キャリブレーションカーブ（単勝）---")
-    print(calib["win"].to_string(index=False))
-    print("--- キャリブレーションカーブ（複勝）---")
-    print(calib["place"].to_string(index=False))
-
-    bias = evaluation.analyze_calibration_bias(calib)
-    print("--- 較正バイアス分析 ---")
-    for key, b in bias.items():
-        label = "単勝" if key == "win" else "複勝"
-        print(f"  {label}: {b['summary']}")
+    print("--- キャリブレーションカーブ（単勝・較正後）---")
+    print(calib_after["win"].to_string(index=False))
+    print("--- キャリブレーションカーブ（複勝・較正後）---")
+    print(calib_after["place"].to_string(index=False))
 
     print("モデルを保存中...")
     version_dir = model.save_models(models)
