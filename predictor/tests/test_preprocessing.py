@@ -9,6 +9,7 @@ from predictor.preprocessing import (
     compute_recent_stats,
     preprocess,
     split_by_date,
+    walk_forward_splits,
 )
 
 
@@ -229,3 +230,49 @@ class TestSplitByDate:
         df = pd.DataFrame({"date": dates, "x": range(10)})
         train, test = split_by_date(df, test_ratio=0.2)
         assert train["date"].max() < test["date"].min()
+
+
+# ──────────────────────────────────────────────
+# walk_forward_splits
+# ──────────────────────────────────────────────
+
+
+class TestWalkForwardSplits:
+    def _make_df(self, n_dates: int) -> pd.DataFrame:
+        dates = pd.date_range("2020-01-01", periods=n_dates, freq="D")
+        return pd.DataFrame({"date": dates, "x": range(n_dates)})
+
+    def test_split_count(self):
+        """n_splits 個の (train, test) ペアが返ること。"""
+        df = self._make_df(30)
+        splits = walk_forward_splits(df, n_splits=5)
+        assert len(splits) == 5
+
+    def test_no_future_leak(self):
+        """各フォールドで train の最大日付 < test の最小日付であること。"""
+        df = self._make_df(30)
+        for train, test in walk_forward_splits(df, n_splits=5):
+            assert train["date"].max() < test["date"].min()
+
+    def test_expanding_window(self):
+        """フォールドが進むにつれ学習データが単調増加すること（expanding window）。"""
+        df = self._make_df(60)
+        splits = walk_forward_splits(df, n_splits=5)
+        train_sizes = [len(tr) for tr, _ in splits]
+        assert train_sizes == sorted(train_sizes)
+        assert len(set(train_sizes)) == len(train_sizes)  # 全フォールドで異なるサイズ
+
+    def test_test_periods_non_overlapping(self):
+        """各フォールドのテスト期間が重複しないこと。"""
+        df = self._make_df(60)
+        splits = walk_forward_splits(df, n_splits=5)
+        test_dates = [set(test["date"].tolist()) for _, test in splits]
+        for i in range(len(test_dates)):
+            for j in range(i + 1, len(test_dates)):
+                assert test_dates[i].isdisjoint(test_dates[j])
+
+    def test_raises_if_too_few_dates(self):
+        """日付数が n_splits + 1 未満の場合 ValueError が出ること。"""
+        df = self._make_df(3)
+        with pytest.raises(ValueError):
+            walk_forward_splits(df, n_splits=5)

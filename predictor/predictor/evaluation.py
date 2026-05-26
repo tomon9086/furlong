@@ -739,3 +739,56 @@ def multi_bet_recovery_analysis(
     if result.empty:
         return result
     return result.set_index("券種")
+
+
+def walk_forward_summary(
+    fold_results: list[dict],
+) -> pd.DataFrame:
+    """Walk-forward 検証の各フォールド結果をまとめた DataFrame を返す。
+
+    Parameters
+    ----------
+    fold_results : list[dict]
+        各フォールドの結果 dict のリスト。各 dict は以下のキーを持つ:
+            fold          : フォールド番号（1 始まり）
+            train_rows    : 学習データ行数
+            test_rows     : テストデータ行数
+            test_start    : テスト期間の開始日（str）
+            test_end      : テスト期間の終了日（str）
+            win_accuracy  : 単勝的中率
+            recovery_rate : 単勝回収率
+            win_brier     : 単勝 Brier score
+            place_brier   : 複勝 Brier score
+            win_logloss   : 単勝 log-loss
+            place_logloss : 複勝 log-loss
+
+    Returns
+    -------
+    pd.DataFrame
+        フォールドを行、指標を列とした DataFrame。
+        末尾に全フォールド平均行（fold='mean'）を付加する。
+    """
+    if not fold_results:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(fold_results).set_index("fold")
+
+    metric_cols = [
+        "win_accuracy",
+        "recovery_rate",
+        "win_brier",
+        "place_brier",
+        "win_logloss",
+        "place_logloss",
+    ]
+    existing_metrics = [c for c in metric_cols if c in df.columns]
+
+    mean_row = df[existing_metrics].mean().to_frame().T
+    mean_row.index = pd.Index(["mean"])
+    mean_row["train_rows"] = float("nan")
+    mean_row["test_rows"] = float("nan")
+    mean_row["test_start"] = ""
+    mean_row["test_end"] = ""
+
+    summary = pd.concat([df, mean_row])
+    return summary

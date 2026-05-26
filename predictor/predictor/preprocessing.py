@@ -674,3 +674,57 @@ def split_by_date(
     test_df = df[df["date"] >= split_date].copy()
 
     return train_df, test_df
+
+
+def walk_forward_splits(
+    df: pd.DataFrame,
+    n_splits: int = 5,
+) -> list[tuple[pd.DataFrame, pd.DataFrame]]:
+    """Walk-forward（expanding window）時系列交差検証の分割を生成する。
+
+    全期間を ``n_splits + 1`` に均等分割し、n_splits 個の (train_df, test_df) ペアを返す。
+    フォールド i では 0..i 期間の累積データで学習し、i+1 期間をテストする
+    （expanding window 方式）。
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        date カラムを持つデータ
+    n_splits : int
+        分割数。デフォルト 5。
+
+    Returns
+    -------
+    list of tuple[pd.DataFrame, pd.DataFrame]
+        (train_df, test_df) のリスト。長さ最大 n_splits。
+        学習データが空のフォールドはスキップされる。
+    """
+    dates = df["date"].dropna().sort_values().unique()
+    n = len(dates)
+
+    if n < n_splits + 1:
+        raise ValueError(
+            f"日付数 ({n}) が n_splits + 1 ({n_splits + 1}) より少ないため分割できません"
+        )
+
+    # n_splits + 1 個の境界インデックスを等間隔で計算
+    split_points = [int(n * i / (n_splits + 1)) for i in range(1, n_splits + 2)]
+
+    splits = []
+    for i in range(n_splits):
+        train_end_idx = split_points[i]
+        test_end_idx = split_points[i + 1]
+
+        train_end_date = dates[train_end_idx]
+        test_start_date = dates[train_end_idx]
+        test_end_date = dates[test_end_idx - 1]
+
+        train_df = df[df["date"] < train_end_date].copy()
+        test_df = df[
+            (df["date"] >= test_start_date) & (df["date"] <= test_end_date)
+        ].copy()
+
+        if len(train_df) > 0 and len(test_df) > 0:
+            splits.append((train_df, test_df))
+
+    return splits
