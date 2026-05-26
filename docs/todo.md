@@ -8,26 +8,6 @@
 > 計画: [plan/prediction-accuracy-followup.md](./plan/prediction-accuracy-followup.md)
 > 目的は精度でなく回収率。「割安な対象（EV > 1）を選んで買う」ベット選択が中核。
 
-### フェーズ1: 事前オッズ取得 → 真の回収率を測定（最優先）
-
-- [x] 事前オッズの保存先を設計する（確定オッズ `race_results.odds` と分離し、**学習には渡さない**方針を spec.md に記録）
-- [x] `scraper`: 締切前（前日／当日朝）オッズページのパーサを追加（`scraper/scraper/parsers/` に odds パーサ）
-- [x] `scraper`: 事前オッズ取得コマンドを `scraper/scraper/main.py` に追加（例 `python -m scraper odds <race_id>`）し、`repository` に保存メソッドを追加
-- [x] `db/schema.sql` に事前オッズ用のカラム／テーブルを追加
-- [x] `predictor`: `load_predict_data`（`preprocessing.py`）で事前オッズを join し、predict 経路へ渡す
-- [x] 対象レースで `predict` を実行し、`output.py` の `ev` が NaN でなくなり単勝推奨が出ることを確認
-- [x] バックテスト（`train_mode` の `ev_filter_analysis`）が確定オッズで稼働していることを確認し、回収率測定の基準とする
-
-### フェーズ2: 確率較正の可視化（Brier / calibration curve）
-
-- [x] `evaluation.py` に Brier score を追加（win / place 両モデル）
-- [x] `evaluation.py` に calibration curve（予測確率ビン別の実測勝率）を算出する関数を追加
-- [x] `main.py` の `train_mode` 出力に Brier・calibration を組み込む
-- [x] 較正のズレ（過信／過小評価）を確認し、必要なら確率較正（Isotonic / Platt）の導入を検討タスク化
-- [x] `predictor/predictor/calibration.py` を新設: `CalibratedClassifierCV`（Isotonic / Platt）で win / place モデルを後段較正する関数を実装
-- [x] `model.py` の学習フローに較正ステップを追加し、較正済みモデルを `models/` に保存
-- [x] 較正前後の Brier score・calibration curve を比較し [experiments.md](./experiments.md) に記録
-
 ### フェーズ4: lambdarank 化／特徴量追加で確率の質を底上げ
 
 - [ ] `model.py` をレース内順位学習（lambdarank, group=レース単位）へ変更する検討・実装（[improvement_plan.md](./improvement_plan.md) B-4）
