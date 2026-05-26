@@ -54,6 +54,13 @@
 - [ ] `predictor/predictor/output.py` の推奨買い目算出を MC ベースに置き換える／追加する（事前オッズ × MC 確率で組合せ馬券の EV を計算）
 - [ ] CSV 出力スキーマに券種別の推奨買い目カラムを追加し、spec.md「出力」を更新
 
+## predict コマンド改善
+
+### 事前オッズ自動取得
+
+- [ ] `predict_mode` 実行時に `pre_race_odds` に該当 race_id のデータがなければ `scraper.main odds <race_id>` を自動実行する（`main.py`）
+- [ ] オッズ取得に失敗した場合は警告を出して予測は続行する（ev = NaN のまま）
+
 ## predictor HTTP API
 
 - [x] `furlong-predictor` の `pyproject.toml` に `uvicorn` / `fastapi` 依存を追加
