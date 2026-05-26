@@ -28,14 +28,6 @@
 - [x] `model.py` の学習フローに較正ステップを追加し、較正済みモデルを `models/` に保存
 - [x] 較正前後の Brier score・calibration curve を比較し [experiments.md](./experiments.md) に記録
 
-### フェーズ3: EVフィルタ × 券種 × 人気帯のグリッドで回収率最適化
-
-- [x] `ev_filter_analysis`（`evaluation.py`）を「EV閾値 × 人気帯」の2軸グリッドに拡張
-- [x] 回収率の bootstrap 信頼区間を算出する関数を追加（110% が誤差でないかを判定。数千ベット規模が前提）
-- [x] 単勝以外の券種（複勝・馬連・三連複など）の回収率評価を追加（`payoffs` テーブルを活用）
-- [x] walk-forward（rolling）検証を実装（`split_by_date` を単一分割から複数期間へ）
-- [ ] 最適な「閾値 × 人気帯 × 券種」の組み合わせを実測し [experiments.md](./experiments.md) に記録
-
 ### フェーズ4: lambdarank 化／特徴量追加で確率の質を底上げ
 
 - [ ] `model.py` をレース内順位学習（lambdarank, group=レース単位）へ変更する検討・実装（[improvement_plan.md](./improvement_plan.md) B-4）

@@ -141,6 +141,15 @@ def train_mode() -> None:
     else:
         print("  払戻データなし（payoffs テーブルが空の可能性あり）")
 
+    print("--- EV閾値 × 人気帯 × 券種 グリッド回収率 ---")
+    ev_multi = evaluation.ev_multi_bet_grid(test_df, pred_df, payoffs_df)
+    if not ev_multi.empty:
+        print(ev_multi["回収率"].unstack("券種").to_string())
+        print("\n推奨数:")
+        print(ev_multi["推奨数"].unstack("券種").to_string())
+    else:
+        print("  データなし")
+
     print("--- キャリブレーションカーブ（単勝・較正後）---")
     print(calib_after["win"].to_string(index=False))
     print("--- キャリブレーションカーブ（複勝・較正後）---")

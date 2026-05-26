@@ -792,3 +792,190 @@ def walk_forward_summary(
 
     summary = pd.concat([df, mean_row])
     return summary
+
+
+# ---------------------------------------------------------------------------
+# EV閾値 × 人気帯 × 券種 の3軸グリッド回収率評価
+# ---------------------------------------------------------------------------
+
+
+def ev_multi_bet_grid(
+    test_df: pd.DataFrame,
+    pred_df: pd.DataFrame,
+    payoffs_df: pd.DataFrame,
+    thresholds: list[float] | None = None,
+) -> pd.DataFrame:
+    """EV閾値 × 人気帯 × 券種 の3軸グリッドで回収率を算出する。
+
+    EV = win_prob × win_odds（確定オッズ）でフィルタリングし、
+    単勝・複勝・馬連・三連複の回収率を各セルで集計する。
+
+    各券種の選択ルール（フィルタを通過したレースに対して）:
+
+    - 単勝  : フィルタ通過馬を単勝で買う
+    - 複勝  : フィルタ通過馬を複勝で買う
+    - 馬連  : top-1 馬がフィルタ通過 → top-2 で馬連 1 点
+    - 三連複 : top-1 馬がフィルタ通過 → top-3 で三連複 1 点
+
+    フィルタ条件: win_prob × win_odds > threshold かつ 人気帯が一致
+
+    Parameters
+    ----------
+    test_df : pd.DataFrame
+        テストデータ（race_id, horse_number, is_win, odds を含む。
+        popularity カラムがある場合は人気帯別集計も行う）
+    pred_df : pd.DataFrame
+        予測結果（race_id, horse_number, win_prob, place_prob を含む）
+    payoffs_df : pd.DataFrame
+        払戻データ（race_id, bet_type, combination, payout を含む）
+    thresholds : list[float] | None
+        EV閾値リスト。None の場合はデフォルト値を使用。
+
+    Returns
+    -------
+    pd.DataFrame
+        MultiIndex（threshold, 人気帯, 券種）を持つ DataFrame。
+        カラム: 推奨数・的中数・的中率・回収率
+    """
+    if thresholds is None:
+        thresholds = [1.0, 1.2, 1.5, 2.0, 3.0]
+
+    use_popularity = "popularity" in test_df.columns
+    test_cols = ["race_id", "horse_number", "is_win", "odds"]
+    if use_popularity:
+        test_cols.append("popularity")
+
+    merged = test_df[test_cols].merge(
+        pred_df[["race_id", "horse_number", "win_prob", "place_prob"]],
+        on=["race_id", "horse_number"],
+    )
+    merged["odds"] = pd.to_numeric(merged["odds"], errors="coerce")
+    merged["ev"] = merged["win_prob"] * merged["odds"]
+    merged["hn_int"] = (
+        pd.to_numeric(merged["horse_number"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+    )
+
+    if use_popularity:
+        merged["popularity"] = pd.to_numeric(merged["popularity"], errors="coerce")
+        merged["popularity_tier"] = merged["popularity"].map(_pop_tier)
+
+    # payoffs 正規化マップを構築
+    payoffs = payoffs_df.copy()
+    payoffs["payout_value"] = payoffs["payout"].apply(_parse_payout)
+    payoffs["combination_norm"] = payoffs["combination"].apply(_normalize_combination)
+    payoff_map: dict[tuple[str, str, str], float] = (
+        payoffs
+        .set_index(["race_id", "bet_type", "combination_norm"])["payout_value"]
+        .to_dict()
+    )
+
+    bet_types = ["単勝", "複勝", "馬連", "三連複"]
+    tier_order = ["全体"] + _POP_TIER_ORDER
+
+    def _stats_for_races(race_ids: set, base_df: pd.DataFrame, bet_type: str) -> dict:
+        """指定レースIDセットに対して bet_type の回収率統計を返す。"""
+        sub = base_df[base_df["race_id"].isin(race_ids)]
+
+        if bet_type == "単勝":
+            n = len(sub)
+            if n == 0:
+                return {"推奨数": 0, "的中数": 0, "的中率": float("nan"), "回収率": float("nan")}
+            wins = int(sub["is_win"].sum())
+            recovered = float((sub["is_win"] * sub["odds"] * 100).sum())
+            return {"推奨数": n, "的中数": wins, "的中率": wins / n, "回収率": recovered / (n * 100)}
+
+        elif bet_type == "複勝":
+            # フィルタ通過馬（1頭）を複勝で購入
+            n = len(sub)
+            if n == 0:
+                return {"推奨数": 0, "的中数": 0, "的中率": float("nan"), "回収率": float("nan")}
+            hits = 0
+            recovered = 0.0
+            for _, row in sub.iterrows():
+                combo = str(int(row["hn_int"]))
+                payout = payoff_map.get((row["race_id"], "複勝", combo), float("nan"))
+                if not pd.isna(payout):
+                    hits += 1
+                    recovered += payout
+            return {"推奨数": n, "的中数": hits, "的中率": hits / n, "回収率": recovered / (n * 100)}
+
+        elif bet_type == "馬連":
+            # フィルタ通過レースで win_prob 上位2頭の馬連1点を購入
+            sub_races = merged[merged["race_id"].isin(race_ids)]
+            rows_list = []
+            for race_id, group in sub_races.groupby("race_id"):
+                top2 = group.nlargest(2, "win_prob")
+                if len(top2) < 2:
+                    continue
+                nums = sorted(top2["hn_int"].tolist())
+                combo = f"{nums[0]}-{nums[1]}"
+                payout = payoff_map.get((race_id, "馬連", combo), float("nan"))
+                rows_list.append({"payout": payout, "is_hit": not pd.isna(payout)})
+            if not rows_list:
+                return {"推奨数": 0, "的中数": 0, "的中率": float("nan"), "回収率": float("nan")}
+            qdf = pd.DataFrame(rows_list)
+            n = len(qdf)
+            hits = int(qdf["is_hit"].sum())
+            recovered = float(qdf["payout"].fillna(0).sum())
+            return {"推奨数": n, "的中数": hits, "的中率": hits / n, "回収率": recovered / (n * 100)}
+
+        elif bet_type == "三連複":
+            # フィルタ通過レースで win_prob 上位3頭の三連複1点を購入
+            sub_races = merged[merged["race_id"].isin(race_ids)]
+            rows_list = []
+            for race_id, group in sub_races.groupby("race_id"):
+                top3 = group.nlargest(3, "win_prob")
+                if len(top3) < 3:
+                    continue
+                nums = sorted(top3["hn_int"].tolist())
+                combo = f"{nums[0]}-{nums[1]}-{nums[2]}"
+                payout = payoff_map.get((race_id, "三連複", combo), float("nan"))
+                rows_list.append({"payout": payout, "is_hit": not pd.isna(payout)})
+            if not rows_list:
+                return {"推奨数": 0, "的中数": 0, "的中率": float("nan"), "回収率": float("nan")}
+            tdf = pd.DataFrame(rows_list)
+            n = len(tdf)
+            hits = int(tdf["is_hit"].sum())
+            recovered = float(tdf["payout"].fillna(0).sum())
+            return {"推奨数": n, "的中数": hits, "的中率": hits / n, "回収率": recovered / (n * 100)}
+
+        return {"推奨数": 0, "的中数": 0, "的中率": float("nan"), "回収率": float("nan")}
+
+    rows = []
+    for thr in thresholds:
+        # EV > threshold のフィルタ通過馬（各レースで win_prob 最大馬かつ EV 閾値以上）
+        # ※ 全馬に対してフィルタをかけると1レースに複数馬が通過する場合があるため、
+        #    各レースの top-1 馬が閾値を超えるかどうかで判定する
+        top1_idx = merged.groupby("race_id")["win_prob"].idxmax()
+        top1 = merged.loc[top1_idx].copy()
+        filtered_top1 = top1[top1["ev"] > thr]
+
+        for tier in tier_order:
+            if tier == "全体":
+                tier_top1 = filtered_top1
+            elif use_popularity:
+                tier_top1 = filtered_top1[filtered_top1["popularity_tier"] == tier]
+            else:
+                continue
+
+            race_ids = set(tier_top1["race_id"].tolist())
+
+            for bet_type in bet_types:
+                stats = _stats_for_races(race_ids, tier_top1, bet_type)
+                rows.append({
+                    "threshold": thr,
+                    "人気帯": tier,
+                    "券種": bet_type,
+                    **stats,
+                })
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+
+    tier_cat = tier_order if use_popularity else ["全体"]
+    df["人気帯"] = pd.Categorical(df["人気帯"], categories=tier_cat, ordered=True)
+    df["券種"] = pd.Categorical(df["券種"], categories=bet_types, ordered=True)
+    return df.set_index(["threshold", "人気帯", "券種"])
