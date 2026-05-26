@@ -115,8 +115,14 @@ def train_mode() -> None:
     print(grade_breakdown.to_string())
 
     ev_analysis = evaluation.ev_filter_analysis(test_df, pred_df)
-    print("--- 期待値フィルタ別（EV基準: 確定オッズ race_results.odds）---")
-    print(ev_analysis.to_string())
+    print("--- 期待値フィルタ別（EV閾値 × 人気帯: 回収率, EV基準: 確定オッズ race_results.odds）---")
+    if isinstance(ev_analysis.index, pd.MultiIndex):
+        for metric in ["回収率", "推奨数", "的中率", "カバレッジ"]:
+            if metric in ev_analysis.columns:
+                print(f"\n{metric}:")
+                print(ev_analysis[metric].unstack("人気帯").to_string())
+    else:
+        print(ev_analysis.to_string())
 
     print("--- キャリブレーションカーブ（単勝・較正後）---")
     print(calib_after["win"].to_string(index=False))

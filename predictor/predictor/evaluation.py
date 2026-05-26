@@ -58,6 +58,21 @@ def evaluate(test_df: pd.DataFrame, pred_df: pd.DataFrame) -> dict[str, float]:
     }
 
 
+def _pop_tier(p: float) -> str:
+    """人気帯ラベルを返す。"""
+    if p == 1:
+        return "1番人気"
+    elif p <= 3:
+        return "2-3番人気"
+    elif p <= 6:
+        return "4-6番人気"
+    else:
+        return "7番人気以下"
+
+
+_POP_TIER_ORDER = ["1番人気", "2-3番人気", "4-6番人気", "7番人気以下"]
+
+
 def evaluate_by_popularity(
     test_df: pd.DataFrame, pred_df: pd.DataFrame
 ) -> dict[str, pd.DataFrame]:
@@ -83,17 +98,6 @@ def evaluate_by_popularity(
     # 各レースで win_prob 最大の馬を推奨馬とする
     top1_idx = merged.groupby("race_id")["win_prob"].idxmax()
     top1 = merged.loc[top1_idx].copy()
-
-    # 人気帯ラベル付け
-    def _pop_tier(p: float) -> str:
-        if p == 1:
-            return "1番人気"
-        elif p <= 3:
-            return "2-3番人気"
-        elif p <= 6:
-            return "4-6番人気"
-        else:
-            return "7番人気以下"
 
     top1["popularity_tier"] = top1["popularity"].map(_pop_tier)
 
@@ -202,10 +206,10 @@ def ev_filter_analysis(
     pred_df: pd.DataFrame,
     thresholds: list[float] | None = None,
 ) -> pd.DataFrame:
-    """期待値フィルタ付き回収率分析。
+    """期待値フィルタ付き回収率分析（EV閾値 × 人気帯の2軸グリッド）。
 
     ``win_prob × odds > threshold`` で絞り込んだ場合の
-    的中率・回収率・カバレッジを複数閾値で算出する。
+    的中率・回収率・カバレッジを「EV閾値 × 人気帯」の2軸グリッドで算出する。
 
     バックテスト（train_mode）では ``test_df["odds"]`` として
     確定オッズ（``race_results.odds``）を使用する。これが回収率測定の基準値となる。
@@ -215,7 +219,8 @@ def ev_filter_analysis(
     Parameters
     ----------
     test_df : pd.DataFrame
-        テストデータ（race_id, horse_number, is_win, odds を含む）
+        テストデータ（race_id, horse_number, is_win, odds を含む。
+        popularity カラムがある場合は人気帯別集計も行う）
     pred_df : pd.DataFrame
         予測結果（race_id, horse_number, win_prob を含む）
     thresholds : list[float] | None
@@ -224,56 +229,71 @@ def ev_filter_analysis(
     Returns
     -------
     pd.DataFrame
-        各閾値での 推奨数・的中数・的中率・回収率・カバレッジ
+        MultiIndex（threshold, 人気帯）を持つ DataFrame。
+        カラム: 推奨数・的中数・的中率・回収率・カバレッジ。
+        人気帯は「全体」「1番人気」「2-3番人気」「4-6番人気」「7番人気以下」。
+        popularity カラムが test_df にない場合は「全体」行のみ返す。
     """
     if thresholds is None:
         thresholds = [1.0, 1.2, 1.5, 2.0, 3.0]
 
-    merged = test_df[["race_id", "horse_number", "is_win", "odds"]].merge(
+    use_popularity = "popularity" in test_df.columns
+    test_cols = ["race_id", "horse_number", "is_win", "odds"]
+    if use_popularity:
+        test_cols.append("popularity")
+
+    merged = test_df[test_cols].merge(
         pred_df[["race_id", "horse_number", "win_prob"]],
         on=["race_id", "horse_number"],
     )
     merged["odds"] = pd.to_numeric(merged["odds"], errors="coerce")
     merged["ev"] = merged["win_prob"] * merged["odds"]
 
+    if use_popularity:
+        merged["popularity"] = pd.to_numeric(merged["popularity"], errors="coerce")
+        merged["popularity_tier"] = merged["popularity"].map(_pop_tier)
+
     total_races = merged["race_id"].nunique()
 
+    def _stats(df: pd.DataFrame, thr: float, tier: str) -> dict:
+        n = len(df)
+        if n == 0:
+            return {
+                "threshold": thr,
+                "人気帯": tier,
+                "推奨数": 0,
+                "的中数": 0,
+                "的中率": float("nan"),
+                "回収率": float("nan"),
+                "カバレッジ": 0.0,
+            }
+        wins = int(df["is_win"].sum())
+        recovered = float((df["is_win"] * df["odds"] * 100).sum())
+        coverage = df["race_id"].nunique() / total_races if total_races > 0 else 0.0
+        return {
+            "threshold": thr,
+            "人気帯": tier,
+            "推奨数": n,
+            "的中数": wins,
+            "的中率": float(df["is_win"].mean()),
+            "回収率": recovered / (n * 100),
+            "カバレッジ": coverage,
+        }
+
+    tier_order = ["全体"] + _POP_TIER_ORDER
     rows = []
     for thr in thresholds:
         filtered = merged[merged["ev"] > thr]
-        n = len(filtered)
-        if n == 0:
-            rows.append(
-                {
-                    "threshold": thr,
-                    "推奨数": 0,
-                    "的中数": 0,
-                    "的中率": float("nan"),
-                    "回収率": float("nan"),
-                    "カバレッジ": 0.0,
-                }
-            )
-            continue
+        rows.append(_stats(filtered, thr, "全体"))
+        if use_popularity:
+            for tier in _POP_TIER_ORDER:
+                rows.append(_stats(filtered[filtered["popularity_tier"] == tier], thr, tier))
 
-        wins = int(filtered["is_win"].sum())
-        win_rate = float(filtered["is_win"].mean())
-        recovered = float((filtered["is_win"] * filtered["odds"] * 100).sum())
-        recovery_rate = recovered / (n * 100)
-        covered_races = filtered["race_id"].nunique()
-        coverage = covered_races / total_races if total_races > 0 else 0.0
-
-        rows.append(
-            {
-                "threshold": thr,
-                "推奨数": n,
-                "的中数": wins,
-                "的中率": win_rate,
-                "回収率": recovery_rate,
-                "カバレッジ": coverage,
-            }
-        )
-
-    return pd.DataFrame(rows).set_index("threshold")
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    df["人気帯"] = pd.Categorical(df["人気帯"], categories=tier_order, ordered=True)
+    return df.set_index(["threshold", "人気帯"])
 
 
 def calibration_curve(
