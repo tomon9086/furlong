@@ -331,3 +331,66 @@ def calibration_curve(
         "win": _calc("win_prob", "is_win"),
         "place": _calc("place_prob", "is_placed"),
     }
+
+
+def analyze_calibration_bias(
+    calib: dict[str, pd.DataFrame],
+) -> dict[str, dict]:
+    """キャリブレーションカーブからズレ（過信／過小評価）を分析する。
+
+    Parameters
+    ----------
+    calib : dict[str, pd.DataFrame]
+        ``calibration_curve`` の返り値（win / place キー）
+
+    Returns
+    -------
+    dict[str, dict]
+        win / place それぞれの分析結果:
+            signed_bias      : 加重平均バイアス（正=過信, 負=過小評価）
+            mean_calib_error : 加重平均較正誤差（絶対値）
+            needs_calibration: 較正を推奨するかどうか (bool)
+            summary          : 人間向けサマリ文字列
+    """
+    THRESHOLD_BIAS = 0.01  # |signed_bias| がこれを超えたら要較正
+    THRESHOLD_MCE = 0.02   # mean_calib_error がこれを超えたら要較正
+
+    result: dict[str, dict] = {}
+    for key in ("win", "place"):
+        df = calib[key].dropna(subset=["mean_pred", "actual_rate"])
+        if df.empty or df["count"].sum() == 0:
+            result[key] = {
+                "signed_bias": float("nan"),
+                "mean_calib_error": float("nan"),
+                "needs_calibration": False,
+                "summary": "データ不足のため評価不可",
+            }
+            continue
+
+        weights = df["count"].astype(float)
+        total_w = weights.sum()
+        diff = df["mean_pred"] - df["actual_rate"]
+        signed_bias = float((diff * weights).sum() / total_w)
+        mce = float((diff.abs() * weights).sum() / total_w)
+
+        needs_calibration = abs(signed_bias) > THRESHOLD_BIAS or mce > THRESHOLD_MCE
+
+        if needs_calibration:
+            direction = "過信（過大評価）" if signed_bias > 0 else "過小評価"
+            summary = (
+                f"{direction}: signed_bias={signed_bias:+.4f}, MCE={mce:.4f}"
+                " → 確率較正（Isotonic / Platt）を推奨"
+            )
+        else:
+            summary = (
+                f"較正誤差は軽微: signed_bias={signed_bias:+.4f}, MCE={mce:.4f}"
+                " → 較正不要"
+            )
+
+        result[key] = {
+            "signed_bias": signed_bias,
+            "mean_calib_error": mce,
+            "needs_calibration": needs_calibration,
+            "summary": summary,
+        }
+    return result

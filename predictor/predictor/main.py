@@ -63,6 +63,12 @@ def train_mode() -> None:
     print("--- キャリブレーションカーブ（複勝）---")
     print(calib["place"].to_string(index=False))
 
+    bias = evaluation.analyze_calibration_bias(calib)
+    print("--- 較正バイアス分析 ---")
+    for key, b in bias.items():
+        label = "単勝" if key == "win" else "複勝"
+        print(f"  {label}: {b['summary']}")
+
     print("モデルを保存中...")
     version_dir = model.save_models(models)
     print(f"完了 ({version_dir.name})")
