@@ -137,7 +137,8 @@ latest_all AS (
     avg_finish_last5, best_finish_last5, avg_last3f_last5,
     avg_corner_last3, avg_corner_last5,
     avg_last3f_rank_last3, avg_last3f_rank_last5,
-    distance AS prev_distance
+    distance AS prev_distance,
+    course_type AS prev_course_type
   FROM windowed
   WHERE rn_all = 1
 ),
@@ -160,6 +161,7 @@ SELECT
   la.avg_corner_last3, la.avg_corner_last5,
   la.avg_last3f_rank_last3, la.avg_last3f_rank_last5,
   la.prev_distance,
+  la.prev_course_type,
   lc.avg_finish_last3_cond, lc.best_finish_last3_cond, lc.avg_last3f_last3_cond,
   lc.avg_finish_last5_cond, lc.best_finish_last5_cond, lc.avg_last3f_last5_cond,
   lc.avg_corner_last3_cond, lc.avg_corner_last5_cond,
@@ -398,6 +400,16 @@ def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFra
         )
         df = df.drop(columns=["prev_distance"])
 
+    # コース替わりフラグ（前走との course_type 変更）: predict 時は prev_course_type が SQL から来る
+    if "prev_course_type" in df.columns:
+        has_prev = df["prev_course_type"].notna()
+        df["course_type_change"] = float("nan")
+        df.loc[has_prev, "course_type_change"] = (
+            df.loc[has_prev, "course_type"].astype(str)
+            != df.loc[has_prev, "prev_course_type"].astype(str)
+        ).astype(float)
+        df = df.drop(columns=["prev_course_type"])
+
     # 性別・年齢の分離（例: '牡5' → sex='牡', age=5）
     df["sex"] = df["sex_age"].str.extract(r"^([^\d]+)")
     df["age"] = pd.to_numeric(df["sex_age"].str.extract(r"(\d+)$")[0], errors="coerce")
@@ -459,6 +471,13 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
         df["_dist_s"], errors="coerce"
     )
     df = df.drop(columns=["_dist_s"])
+
+    # コース替わりフラグ（前走との course_type 変更）
+    df["_course_s"] = df.groupby("horse_id", observed=True)["course_type"].shift(1)
+    same_course = df["course_type"] == df["_course_s"]
+    df["course_type_change"] = (~same_course).astype(float)
+    df.loc[df["_course_s"].isna(), "course_type_change"] = float("nan")
+    df = df.drop(columns=["_course_s"])
 
     # 当該レースを除くため1つシフト（group 境界を超えない）
     df["_pos_s"] = df.groupby("horse_id", observed=True)["finishing_position"].shift(1)
@@ -636,6 +655,7 @@ def get_feature_columns() -> list[str]:
         "horse_weight_diff",
         # 前走との比較
         "distance_change",
+        "course_type_change",
         # 近走成績（全レース・直近3走）
         "avg_finish_last3",
         "best_finish_last3",

@@ -173,6 +173,23 @@ class TestPreprocess:
         df = preprocess(raw)
         assert len(df) == 2
 
+    def test_prev_course_type_creates_change_flag(self):
+        """prev_course_type が与えられた場合、course_type_change が生成されること。"""
+        raw = _make_raw_df(2)
+        raw["prev_course_type"] = ["ダート", "芝"]  # idx0: ダート→芝(変化), idx1: 芝→芝(変化なし)
+        df = preprocess(raw)
+        assert "course_type_change" in df.columns
+        assert "prev_course_type" not in df.columns
+        assert df["course_type_change"].iloc[0] == pytest.approx(1.0)
+        assert df["course_type_change"].iloc[1] == pytest.approx(0.0)
+
+    def test_prev_course_type_none_is_nan(self):
+        """prev_course_type が NULL の場合、course_type_change は NaN であること。"""
+        raw = _make_raw_df(1)
+        raw["prev_course_type"] = [None]
+        df = preprocess(raw)
+        assert pd.isna(df["course_type_change"].iloc[0])
+
 
 # ──────────────────────────────────────────────
 # compute_recent_stats
@@ -209,6 +226,30 @@ class TestComputeRecentStats:
         ]
         for col in expected_cols:
             assert col in result.columns, f"{col} が結果に含まれていません"
+
+    def test_course_type_change_first_race_is_nan(self):
+        """1走目のコース替わりフラグは NaN であること（前走なし）。"""
+        df = preprocess(_make_multi_race_raw_df())
+        result = compute_recent_stats(df)
+        first_races = result[result["race_id"] == "R0"]
+        assert first_races["course_type_change"].isna().all()
+
+    def test_course_type_change_same_course_is_zero(self):
+        """2走目以降、コースが変わらない場合はフラグは0であること。"""
+        df = preprocess(_make_multi_race_raw_df())
+        result = compute_recent_stats(df)
+        later_races = result[result["race_id"] != "R0"]
+        assert (later_races["course_type_change"] == 0.0).all()
+
+    def test_course_type_change_different_course_is_one(self):
+        """2走目のコースが前走と異なる場合、フラグは1であること。"""
+        raw = _make_multi_race_raw_df()
+        # H0 の R1 を ダート に変更（R0 は芝 → R1 はダート）
+        raw.loc[(raw["horse_id"] == "H0") & (raw["race_id"] == "R1"), "course_type"] = "ダート"
+        df = preprocess(raw)
+        result = compute_recent_stats(df)
+        h0_r1 = result[(result["horse_id"] == "H0") & (result["race_id"] == "R1")]
+        assert h0_r1["course_type_change"].iloc[0] == pytest.approx(1.0)
 
 
 # ──────────────────────────────────────────────
