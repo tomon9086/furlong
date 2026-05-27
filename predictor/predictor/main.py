@@ -10,7 +10,7 @@ load_dotenv()
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 
-def train_mode() -> None:
+def train_mode(walkforward: bool = True) -> None:
     """学習モード: 全データを使ってモデルを学習し保存する。"""
     import pandas as pd
 
@@ -21,7 +21,6 @@ def train_mode() -> None:
         load_payoffs,
         preprocess,
         split_by_date,
-        walk_forward_splits,
     )
 
     print("データを読み込み中...")
@@ -133,6 +132,26 @@ def train_mode() -> None:
     if not boot_ci.empty:
         print(boot_ci.to_string())
 
+    # フェーズ2: MC 単勝確率バックテスト
+    print("MC 単勝確率を算出中（n_iter=10,000, seed=42）...")
+    pred_df_mc = evaluation.compute_mc_win_probs(pred_df, rng_seed=42)
+    mc_diff = evaluation.mc_win_prob_comparison(pred_df_mc)
+    print("--- MC 単勝確率 vs 直接 win_prob（サニティチェック）---")
+    for k, v in mc_diff.items():
+        print(f"  {k}: {v:.6f}")
+
+    mc_ev_analysis = evaluation.mc_ev_filter_analysis(test_df, pred_df_mc)
+    print(
+        "--- 期待値フィルタ別（MC単勝確率使用, EV基準: mc_win_prob × race_results.odds）---"
+    )
+    if isinstance(mc_ev_analysis.index, pd.MultiIndex):
+        for metric in ["回収率", "推奨数", "的中率", "カバレッジ"]:
+            if metric in mc_ev_analysis.columns:
+                print(f"\n{metric}:")
+                print(mc_ev_analysis[metric].unstack("人気帯").to_string())
+    else:
+        print(mc_ev_analysis.to_string())
+
     print("払戻データを読み込み中...")
     test_race_ids = test_df["race_id"].unique().tolist()
     payoffs_df = load_payoffs(DATABASE_URL, test_race_ids)
@@ -157,35 +176,37 @@ def train_mode() -> None:
     print("--- キャリブレーションカーブ（複勝・較正後）---")
     print(calib_after["place"].to_string(index=False))
 
-    print("--- Walk-forward（rolling）検証 ---")
-    from predictor import calibration as _calib_mod
+    if walkforward:
+        print("--- Walk-forward（rolling）検証 ---")
+        from predictor import calibration as _calib_mod
+        from predictor.preprocessing import walk_forward_splits
 
-    wf_splits = walk_forward_splits(df, n_splits=5)
-    fold_results = []
-    for fold_idx, (wf_train, wf_test) in enumerate(wf_splits, start=1):
-        print(
-            f"  フォールド {fold_idx}/{len(wf_splits)}: "
-            f"学習 {len(wf_train):,} 行  "
-            f"テスト {len(wf_test):,} 行  "
-            f"({wf_test['date'].min()} 〜 {wf_test['date'].max()})"
-        )
-        wf_models = model.train(wf_train)
-        wf_calibrated = _calib_mod.calibrate_models(wf_models, wf_test)
-        wf_pred = model.predict(wf_calibrated, wf_test)
-        wf_metrics = evaluation.evaluate(wf_test, wf_pred)
-        fold_results.append(
-            {
-                "fold": fold_idx,
-                "train_rows": len(wf_train),
-                "test_rows": len(wf_test),
-                "test_start": wf_test["date"].min(),
-                "test_end": wf_test["date"].max(),
-                **wf_metrics,
-            }
-        )
+        wf_splits = walk_forward_splits(df, n_splits=5)
+        fold_results = []
+        for fold_idx, (wf_train, wf_test) in enumerate(wf_splits, start=1):
+            print(
+                f"  フォールド {fold_idx}/{len(wf_splits)}: "
+                f"学習 {len(wf_train):,} 行  "
+                f"テスト {len(wf_test):,} 行  "
+                f"({wf_test['date'].min()} 〜 {wf_test['date'].max()})"
+            )
+            wf_models = model.train(wf_train)
+            wf_calibrated = _calib_mod.calibrate_models(wf_models, wf_test)
+            wf_pred = model.predict(wf_calibrated, wf_test)
+            wf_metrics = evaluation.evaluate(wf_test, wf_pred)
+            fold_results.append(
+                {
+                    "fold": fold_idx,
+                    "train_rows": len(wf_train),
+                    "test_rows": len(wf_test),
+                    "test_start": wf_test["date"].min(),
+                    "test_end": wf_test["date"].max(),
+                    **wf_metrics,
+                }
+            )
 
-    wf_summary = evaluation.walk_forward_summary(fold_results)
-    print(wf_summary.to_string())
+        wf_summary = evaluation.walk_forward_summary(fold_results)
+        print(wf_summary.to_string())
 
     print("モデルを保存中...")
     version_dir = model.save_models(models)
@@ -264,13 +285,14 @@ def predict_mode(race_id: str) -> None:
 
 def main() -> None:
     if len(sys.argv) < 2:
-        print("使い方: python -m predictor.main train | predict <race_id>")
+        print("使い方: python -m predictor.main train [--no-walkforward] | predict <race_id>")
         sys.exit(1)
 
     command = sys.argv[1]
 
     if command == "train":
-        train_mode()
+        walkforward = "--no-walkforward" not in sys.argv
+        train_mode(walkforward=walkforward)
     elif command == "predict":
         if len(sys.argv) < 3:
             print("使い方: python -m predictor.main predict <race_id>")

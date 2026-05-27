@@ -4,39 +4,135 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+
+from predictor.simulation import (
+    DEFAULT_N_ITER as _MC_DEFAULT_N_ITER,
+    quinella_probability as _quinella_probability,
+    simulate_finishing_orders as _simulate_finishing_orders,
+    trifecta_box_probability as _trifecta_box_probability,
+    wide_probability as _wide_probability,
+    place_probability as _place_probability,
+    win_probability as _win_probability,
+)
 
 _OUTPUT_DIR = Path("output")
 _EV_THRESHOLD = 1.5
+_MC_SEED = 42
 
 
-def _mark_recommended(pred_df: pd.DataFrame) -> pd.DataFrame:
-    """推奨買い目フラグを付与する。
+def _mark_recommended(
+    pred_df: pd.DataFrame, rng_seed: int | None = _MC_SEED
+) -> pd.DataFrame:
+    """MC シミュレーションを用いて推奨買い目フラグを付与する。
 
-    - 単勝: win_prob 上位1頭 かつ EV（win_prob × odds）> _EV_THRESHOLD
-    - 複勝: place_prob 上位3頭
+    - 単勝: MC EV（mc_win_prob × win_odds）> _EV_THRESHOLD のうち mc_win_prob 最大の1頭
+    - 複勝: MC place_prob 上位3頭
+    - 馬連: MC 馬連確率（両馬が2着以内に収まる確率）が最大のペア
+    - ワイド: MC ワイド確率（両馬が3着以内に収まる確率）が最大のペア
+    - 三連複: MC 三連複確率（3頭が3着以内に収まる確率）が最大のトリプレット
     """
+    rng = np.random.default_rng(rng_seed)
     df = pred_df.copy()
 
     if "win_odds" in df.columns:
         df["win_odds"] = pd.to_numeric(df["win_odds"], errors="coerce")
-        df["ev"] = df["win_prob"] * df["win_odds"]
+        odds_col = "win_odds"
     elif "odds" in df.columns:
         df["odds"] = pd.to_numeric(df["odds"], errors="coerce")
-        df["ev"] = df["win_prob"] * df["odds"]
-
-    win_top_idx = df.groupby("race_id")["win_prob"].idxmax()
-    df["recommended_win"] = False
-    if "ev" in df.columns:
-        valid_win_idx = [i for i in win_top_idx if df.loc[i, "ev"] > _EV_THRESHOLD]
+        odds_col = "odds"
     else:
-        valid_win_idx = list(win_top_idx)
-    df.loc[valid_win_idx, "recommended_win"] = True
+        odds_col = None
 
-    place_rank = df.groupby("race_id")["place_prob"].rank(ascending=False, method="min")
-    df["recommended_place"] = place_rank <= 3
+    df["mc_win_prob"] = np.nan
+    df["mc_place_prob"] = np.nan
+    df["mc_ev"] = np.nan
+    df["recommended_win"] = False
+    df["recommended_place"] = False
+    df["recommended_quinella"] = False
+    df["recommended_wide"] = False
+    df["recommended_trifecta_box"] = False
 
-    df["recommended"] = df["recommended_win"] | df["recommended_place"]
+    for race_id, group in df.groupby("race_id"):
+        idx = group.index
+        n = len(group)
+        win_probs_raw = group["win_prob"].to_numpy(dtype=float)
+
+        if np.isnan(win_probs_raw).all() or np.nan_to_num(win_probs_raw).sum() <= 0:
+            continue
+
+        win_probs = np.nan_to_num(win_probs_raw, nan=0.0)
+        orders = _simulate_finishing_orders(
+            win_probs, n_iter=_MC_DEFAULT_N_ITER, rng=rng
+        )
+
+        mc_win = _win_probability(orders)
+        mc_place = _place_probability(orders)
+        df.loc[idx, "mc_win_prob"] = mc_win
+        df.loc[idx, "mc_place_prob"] = mc_place
+
+        # 単勝 EV（mc_win_prob × win_odds）
+        if odds_col is not None:
+            win_odds_vals = group[odds_col].to_numpy(dtype=float)
+            mc_ev_vals = mc_win * win_odds_vals
+            df.loc[idx, "mc_ev"] = mc_ev_vals
+            ev_mask = mc_ev_vals > _EV_THRESHOLD
+            if ev_mask.any():
+                masked_mc_win = np.where(ev_mask, mc_win, -1.0)
+                best_pos = int(np.argmax(masked_mc_win))
+                df.loc[idx[best_pos], "recommended_win"] = True
+        else:
+            best_pos = int(np.argmax(mc_win))
+            df.loc[idx[best_pos], "recommended_win"] = True
+
+        # 複勝: mc_place_prob 上位3頭
+        place_ranks = pd.Series(mc_place, index=idx).rank(ascending=False, method="min")
+        df.loc[place_ranks[place_ranks <= 3].index, "recommended_place"] = True
+
+        # 馬連: MC 馬連確率最大ペア
+        if n >= 2:
+            q_probs = _quinella_probability(orders)
+            upper = np.triu(q_probs, k=1)
+            if upper.max() > 0:
+                bi, bj = np.unravel_index(np.argmax(upper), upper.shape)
+                df.loc[idx[int(bi)], "recommended_quinella"] = True
+                df.loc[idx[int(bj)], "recommended_quinella"] = True
+
+        # ワイド: MC ワイド確率最大ペア
+        if n >= 2:
+            w_probs = _wide_probability(orders)
+            upper_w = np.triu(w_probs, k=1)
+            if upper_w.max() > 0:
+                wi, wj = np.unravel_index(np.argmax(upper_w), upper_w.shape)
+                df.loc[idx[int(wi)], "recommended_wide"] = True
+                df.loc[idx[int(wj)], "recommended_wide"] = True
+
+        # 三連複: MC 三連複確率最大トリプレット
+        if n >= 3:
+            tb_probs = _trifecta_box_probability(orders)
+            best_prob = 0.0
+            best_triple: tuple[int, int, int] | None = None
+            for i in range(n):
+                for j in range(i + 1, n):
+                    for k in range(j + 1, n):
+                        p = tb_probs[i, j, k]
+                        if p > best_prob:
+                            best_prob = p
+                            best_triple = (i, j, k)
+            if best_triple is not None:
+                bi2, bj2, bk2 = best_triple
+                df.loc[idx[bi2], "recommended_trifecta_box"] = True
+                df.loc[idx[bj2], "recommended_trifecta_box"] = True
+                df.loc[idx[bk2], "recommended_trifecta_box"] = True
+
+    df["recommended"] = (
+        df["recommended_win"]
+        | df["recommended_place"]
+        | df["recommended_quinella"]
+        | df["recommended_wide"]
+        | df["recommended_trifecta_box"]
+    )
 
     return df
 
@@ -53,29 +149,48 @@ def print_prediction(pred_df: pd.DataFrame) -> None:
     ]
     if "horse_name" in df.columns:
         display_cols.insert(1, "horse_name")
-    if "ev" in df.columns:
-        display_cols.insert(display_cols.index("recommended"), "ev")
+    if "mc_ev" in df.columns:
+        display_cols.insert(display_cols.index("recommended"), "mc_ev")
 
     for race_id, group in df.groupby("race_id"):
         group = group.sort_values("predicted_rank")
+        show_cols = [c for c in display_cols if c in group.columns]
         print(f"\n=== レース {race_id} ===")
-        print(group[display_cols].to_string(index=False))
+        print(group[show_cols].to_string(index=False))
 
         win_horses = group[group["recommended_win"]]
         place_horses = group[group["recommended_place"]]
+        quinella_horses = group[group["recommended_quinella"]].sort_values(
+            "horse_number"
+        )
+        wide_horses = group[group["recommended_wide"]].sort_values("horse_number")
+        trifecta_horses = group[group["recommended_trifecta_box"]].sort_values(
+            "horse_number"
+        )
 
-        print("\n  推奨買い目:")
+        print("\n  推奨買い目 (MC ベース):")
         if win_horses.empty:
-            print(f"    単勝 : (EV しきい値 {_EV_THRESHOLD} 未達・推奨なし)")
+            print(f"    単勝 : (MC EV しきい値 {_EV_THRESHOLD} 未達・推奨なし)")
         else:
-            print(f"    単勝 : {win_horses['horse_number'].tolist()}")
+            if "mc_ev" in win_horses.columns and not win_horses["mc_ev"].isna().all():
+                ev_str = f" (MC EV={float(win_horses['mc_ev'].iloc[0]):.2f})"
+            else:
+                ev_str = ""
+            print(f"    単勝 : {win_horses['horse_number'].tolist()}{ev_str}")
+
         print(f"    複勝 : {place_horses['horse_number'].tolist()}")
-        if len(place_horses) >= 2:
-            top2 = place_horses.nsmallest(2, "predicted_rank")["horse_number"].tolist()
-            print(f"    馬連  : {top2[0]}-{top2[1]}")
-        if len(place_horses) >= 3:
-            top3 = place_horses.nsmallest(3, "predicted_rank")["horse_number"].tolist()
-            print(f"    三連複: {top3[0]}-{top3[1]}-{top3[2]}")
+
+        if len(quinella_horses) >= 2:
+            hn = quinella_horses["horse_number"].tolist()
+            print(f"    馬連  : {hn[0]}-{hn[1]}")
+
+        if len(wide_horses) >= 2:
+            hn = wide_horses["horse_number"].tolist()
+            print(f"    ワイド: {hn[0]}-{hn[1]}")
+
+        if len(trifecta_horses) >= 3:
+            hn = trifecta_horses["horse_number"].tolist()
+            print(f"    三連複: {hn[0]}-{hn[1]}-{hn[2]}")
 
 
 def save_csv(
