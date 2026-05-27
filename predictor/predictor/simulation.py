@@ -108,3 +108,84 @@ def place_probability(
         各馬の複勝確率（[0, 1]）。
     """
     return (orders <= n_place).mean(axis=0)
+
+
+def quinella_probability(
+    orders: np.ndarray,
+) -> np.ndarray:
+    """MC サンプルから馬連確率を算出する。
+
+    馬連: 2頭が1・2着（順不同）に収まる確率。
+
+    Parameters
+    ----------
+    orders : np.ndarray, shape (n_iter, n_horses)
+        ``simulate_finishing_orders`` の出力。
+
+    Returns
+    -------
+    np.ndarray, shape (n_horses, n_horses)
+        ``result[i, j]`` = 馬 i と馬 j が1・2着以内に収まる確率。
+        対角成分は 0（自己との組合せは無意味）。
+    """
+    n_iter = orders.shape[0]
+    in_top2 = (orders <= 2).astype(np.float64)  # (n_iter, n_horses)
+    probs = (in_top2.T @ in_top2) / n_iter  # (n_horses, n_horses)
+    np.fill_diagonal(probs, 0.0)
+    return probs
+
+
+def wide_probability(
+    orders: np.ndarray,
+) -> np.ndarray:
+    """MC サンプルからワイド確率を算出する。
+
+    ワイド: 2頭がともに3着以内に収まる確率。
+
+    Parameters
+    ----------
+    orders : np.ndarray, shape (n_iter, n_horses)
+        ``simulate_finishing_orders`` の出力。
+
+    Returns
+    -------
+    np.ndarray, shape (n_horses, n_horses)
+        ``result[i, j]`` = 馬 i と馬 j がともに3着以内に収まる確率。
+        対角成分は 0。
+    """
+    n_iter = orders.shape[0]
+    in_top3 = (orders <= 3).astype(np.float64)  # (n_iter, n_horses)
+    probs = (in_top3.T @ in_top3) / n_iter  # (n_horses, n_horses)
+    np.fill_diagonal(probs, 0.0)
+    return probs
+
+
+def trifecta_box_probability(
+    orders: np.ndarray,
+) -> np.ndarray:
+    """MC サンプルから三連複確率を算出する。
+
+    三連複: 3頭が1〜3着以内に収まる（順不同）確率。
+
+    Parameters
+    ----------
+    orders : np.ndarray, shape (n_iter, n_horses)
+        ``simulate_finishing_orders`` の出力。
+
+    Returns
+    -------
+    np.ndarray, shape (n_horses, n_horses, n_horses)
+        正準形 (i < j < k) の組合せで確率を格納。
+        ``result[i, j, k]`` (i < j < k) = 馬 i・j・k が1〜3着以内に収まる確率。
+        それ以外のインデックス順は 0。
+    """
+    n_iter, n_horses = orders.shape
+    result = np.zeros((n_horses, n_horses, n_horses), dtype=np.float64)
+
+    # 各イテレーションの上位3頭インデックスを昇順（正準形）に取得
+    top3_indices = np.argsort(orders, axis=1)[:, :3]  # (n_iter, 3)
+    top3_sorted = np.sort(top3_indices, axis=1)  # (n_iter, 3)
+
+    np.add.at(result, (top3_sorted[:, 0], top3_sorted[:, 1], top3_sorted[:, 2]), 1)
+    result /= n_iter
+    return result

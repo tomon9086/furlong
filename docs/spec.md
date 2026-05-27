@@ -262,16 +262,25 @@ furlong/
 | `win_prob` | 単勝確率（0〜1） |
 | `place_prob` | 複勝確率（0〜1、3着以内） |
 | `predicted_rank` | 予測着順 |
-| `recommended` | 推奨買い目フラグ（`true`/`false`） |
+| `mc_win_prob` | MC 単勝確率（0〜1） |
+| `mc_place_prob` | MC 複勝確率（0〜1、3着以内） |
+| `mc_ev` | MC 単勝 EV（`mc_win_prob × win_odds`。`win_odds` 未取得時は NaN） |
+| `recommended_win` | 単勝推奨フラグ |
+| `recommended_place` | 複勝推奨フラグ |
+| `recommended_quinella` | 馬連推奨フラグ（各レースの推奨ペア2頭に `true`） |
+| `recommended_wide` | ワイド推奨フラグ（各レースの推奨ペア2頭に `true`） |
+| `recommended_trifecta_box` | 三連複推奨フラグ（各レースの推奨トリプレット3頭に `true`） |
+| `recommended` | いずれかの券種で推奨の場合 `true` |
 
-推奨買い目の基準：
+推奨買い目の基準（MC ベース）：
 
 | 券種 | 推奨基準 |
 |---|---|
-| 単勝 | `win_prob` 上位1頭 |
-| 複勝 | `place_prob` 上位3頭 |
-| 馬連・馬単 | `predicted_rank` 1・2位の組み合わせ |
-| 三連複・三連単 | `predicted_rank` 1〜3位の組み合わせ |
+| 単勝 | MC EV（`mc_win_prob × win_odds`）> 1.5 のうち `mc_win_prob` 最大の1頭 |
+| 複勝 | MC `place_prob` 上位3頭 |
+| 馬連 | MC 馬連確率（両馬が2着以内に収まる確率）が最大のペア1点 |
+| ワイド | MC ワイド確率（両馬が3着以内に収まる確率）が最大のペア1点 |
+| 三連複 | MC 三連複確率（3頭が3着以内に収まる確率）が最大のトリプレット1点 |
 
 ---
 
