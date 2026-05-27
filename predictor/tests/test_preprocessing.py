@@ -223,9 +223,26 @@ class TestComputeRecentStats:
             "avg_finish_last3_cond", "best_finish_last3_cond", "avg_last3f_last3_cond",
             "avg_finish_last5_cond", "best_finish_last5_cond", "avg_last3f_last5_cond",
             "avg_corner_last3_cond", "avg_corner_last5_cond",
+            "bracket_distance_avg_finish",
         ]
         for col in expected_cols:
             assert col in result.columns, f"{col} が結果に含まれていません"
+
+    def test_bracket_distance_avg_finish_no_leak_first_race(self):
+        """1走目の bracket_distance_avg_finish は NaN になること（過去データなし）。"""
+        df = preprocess(_make_multi_race_raw_df())
+        result = compute_recent_stats(df)
+        first_races = result[result["race_id"] == "R0"]
+        assert first_races["bracket_distance_avg_finish"].isna().all()
+
+    def test_bracket_distance_avg_finish_uses_past_only(self):
+        """2走目以降は過去レースのみを使って平均着順を計算すること。"""
+        df = preprocess(_make_multi_race_raw_df())
+        result = compute_recent_stats(df)
+        # bracket_number=1 の馬(H0)は全レースで finishing_position=1 なので
+        # 2走目以降の bracket_distance_avg_finish は 1.0 に収束するはず
+        h0_r4 = result[(result["horse_id"] == "H0") & (result["race_id"] == "R4")]
+        assert h0_r4["bracket_distance_avg_finish"].iloc[0] == pytest.approx(1.0)
 
     def test_course_type_change_first_race_is_nan(self):
         """1走目のコース替わりフラグは NaN であること（前走なし）。"""

@@ -220,6 +220,36 @@ FROM payoffs
 WHERE race_id = ANY(%s)
 """
 
+_BRACKET_DISTANCE_AVG_QUERY = """
+SELECT
+  rr.bracket_number AS bracket_number,
+  AVG(rr.finishing_position::float) AS bracket_distance_avg_finish
+FROM race_results rr
+JOIN races r ON rr.race_id = r.race_id
+WHERE rr.finishing_position ~ '^[0-9]+$'
+  AND rr.bracket_number ~ '^[0-9]+$'
+  AND r.distance ~ '^[0-9]+$'
+  AND CASE
+    WHEN r.distance::integer <= 1400 THEN 0
+    WHEN r.distance::integer <= 1800 THEN 1
+    WHEN r.distance::integer <= 2200 THEN 2
+    ELSE 3
+  END = %s
+GROUP BY rr.bracket_number
+"""
+
+
+def _get_distance_band(distance: int) -> int:
+    """距離をバンド番号に変換する（0=~1400, 1=1401~1800, 2=1801~2200, 3=2201~）。"""
+    if distance <= 1400:
+        return 0
+    elif distance <= 1800:
+        return 1
+    elif distance <= 2200:
+        return 2
+    else:
+        return 3
+
 
 def load_payoffs(database_url: str, race_ids: list[str]) -> pd.DataFrame:
     """指定レースの払戻データを DB から読み込む。"""
@@ -286,11 +316,18 @@ def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
             pre_odds_cols = [desc[0] for desc in cur.description]
             pre_odds_df = pd.DataFrame(pre_odds_rows, columns=pre_odds_cols)
 
+            distance_band = _get_distance_band(distance)
+            cur.execute(_BRACKET_DISTANCE_AVG_QUERY, (distance_band,))
+            bracket_rows = cur.fetchall()
+            bracket_cols = [desc[0] for desc in cur.description]
+            bracket_df = pd.DataFrame(bracket_rows, columns=bracket_cols)
+
     return (
         target_df.merge(stats_df, on="horse_id", how="left")
         .merge(jockey_df, on="jockey_id", how="left")
         .merge(trainer_df, on="trainer_id", how="left")
         .merge(pre_odds_df, on="horse_number", how="left")
+        .merge(bracket_df, on="bracket_number", how="left")
     )
 
 
@@ -397,6 +434,7 @@ def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFra
         "avg_last3f_rank_last5_cond",
         "jockey_win_rate_venue_cond",
         "trainer_win_rate_last30",
+        "bracket_distance_avg_finish",
     ):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -656,6 +694,33 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
     df_trainer = df_trainer.drop(columns=["_trainer_is_win_s"])
     df["trainer_win_rate_last30"] = df_trainer["trainer_win_rate_last30"]
 
+    # ── 枠番 × 距離帯: 累積平均着順 ────────────────────────────────────────
+    df["_distance_band"] = pd.cut(
+        pd.to_numeric(df["distance"], errors="coerce"),
+        bins=[0, 1400, 1800, 2200, 10000],
+        labels=[0, 1, 2, 3],
+    )
+    bracket_key = ["bracket_number", "_distance_band"]
+    df_bracket = df.sort_values(bracket_key + ["date", "race_id"])
+
+    df_bracket["_bracket_cumcount"] = df_bracket.groupby(
+        bracket_key, observed=True
+    ).cumcount()
+    df_bracket["_bracket_cumsum"] = (
+        df_bracket.groupby(bracket_key, observed=True)["finishing_position"]
+        .cumsum()
+        .astype(float)
+    )
+    df_bracket["_bracket_prior_sum"] = df_bracket.groupby(
+        bracket_key, observed=True, sort=False
+    )["_bracket_cumsum"].shift(1)
+    df_bracket["bracket_distance_avg_finish"] = df_bracket[
+        "_bracket_prior_sum"
+    ] / df_bracket["_bracket_cumcount"].replace(0, float("nan"))
+
+    df["bracket_distance_avg_finish"] = df_bracket["bracket_distance_avg_finish"]
+    df = df.drop(columns=["_distance_band"])
+
     return df
 
 
@@ -723,6 +788,8 @@ def get_feature_columns() -> list[str]:
         # 騎手・調教師
         "jockey_id",
         "trainer_id",
+        # 枠番 × 距離帯
+        "bracket_distance_avg_finish",
     ]
 
 
