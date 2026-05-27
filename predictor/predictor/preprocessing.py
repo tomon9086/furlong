@@ -440,10 +440,9 @@ def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFra
 
     # 距離変化（前走との距離差）: predict 時は prev_distance が SQL から来る
     if "prev_distance" in df.columns:
-        df["distance_change"] = (
-            pd.to_numeric(df["distance"], errors="coerce")
-            - pd.to_numeric(df["prev_distance"], errors="coerce")
-        )
+        df["distance_change"] = pd.to_numeric(
+            df["distance"], errors="coerce"
+        ) - pd.to_numeric(df["prev_distance"], errors="coerce")
         df = df.drop(columns=["prev_distance"])
 
     # コース替わりフラグ（前走との course_type 変更）: predict 時は prev_course_type が SQL から来る
@@ -523,9 +522,9 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
 
     # 距離変化（前走との距離差）
     df["_dist_s"] = df.groupby("horse_id", observed=True)["distance"].shift(1)
-    df["distance_change"] = pd.to_numeric(df["distance"], errors="coerce") - pd.to_numeric(
-        df["_dist_s"], errors="coerce"
-    )
+    df["distance_change"] = pd.to_numeric(
+        df["distance"], errors="coerce"
+    ) - pd.to_numeric(df["_dist_s"], errors="coerce")
     df = df.drop(columns=["_dist_s"])
 
     # コース替わりフラグ（前走との course_type 変更）

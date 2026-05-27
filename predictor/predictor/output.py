@@ -22,7 +22,9 @@ _EV_THRESHOLD = 1.5
 _MC_SEED = 42
 
 
-def _mark_recommended(pred_df: pd.DataFrame, rng_seed: int | None = _MC_SEED) -> pd.DataFrame:
+def _mark_recommended(
+    pred_df: pd.DataFrame, rng_seed: int | None = _MC_SEED
+) -> pd.DataFrame:
     """MC シミュレーションを用いて推奨買い目フラグを付与する。
 
     - 単勝: MC EV（mc_win_prob × win_odds）> _EV_THRESHOLD のうち mc_win_prob 最大の1頭
@@ -61,7 +63,9 @@ def _mark_recommended(pred_df: pd.DataFrame, rng_seed: int | None = _MC_SEED) ->
             continue
 
         win_probs = np.nan_to_num(win_probs_raw, nan=0.0)
-        orders = _simulate_finishing_orders(win_probs, n_iter=_MC_DEFAULT_N_ITER, rng=rng)
+        orders = _simulate_finishing_orders(
+            win_probs, n_iter=_MC_DEFAULT_N_ITER, rng=rng
+        )
 
         mc_win = _win_probability(orders)
         mc_place = _place_probability(orders)
@@ -156,9 +160,13 @@ def print_prediction(pred_df: pd.DataFrame) -> None:
 
         win_horses = group[group["recommended_win"]]
         place_horses = group[group["recommended_place"]]
-        quinella_horses = group[group["recommended_quinella"]].sort_values("horse_number")
+        quinella_horses = group[group["recommended_quinella"]].sort_values(
+            "horse_number"
+        )
         wide_horses = group[group["recommended_wide"]].sort_values("horse_number")
-        trifecta_horses = group[group["recommended_trifecta_box"]].sort_values("horse_number")
+        trifecta_horses = group[group["recommended_trifecta_box"]].sort_values(
+            "horse_number"
+        )
 
         print("\n  推奨買い目 (MC ベース):")
         if win_horses.empty:
