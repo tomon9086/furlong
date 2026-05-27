@@ -10,7 +10,7 @@ load_dotenv()
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 
-def train_mode() -> None:
+def train_mode(walkforward: bool = True) -> None:
     """学習モード: 全データを使ってモデルを学習し保存する。"""
     import pandas as pd
 
@@ -21,7 +21,6 @@ def train_mode() -> None:
         load_payoffs,
         preprocess,
         split_by_date,
-        walk_forward_splits,
     )
 
     print("データを読み込み中...")
@@ -157,35 +156,37 @@ def train_mode() -> None:
     print("--- キャリブレーションカーブ（複勝・較正後）---")
     print(calib_after["place"].to_string(index=False))
 
-    print("--- Walk-forward（rolling）検証 ---")
-    from predictor import calibration as _calib_mod
+    if walkforward:
+        print("--- Walk-forward（rolling）検証 ---")
+        from predictor import calibration as _calib_mod
+        from predictor.preprocessing import walk_forward_splits
 
-    wf_splits = walk_forward_splits(df, n_splits=5)
-    fold_results = []
-    for fold_idx, (wf_train, wf_test) in enumerate(wf_splits, start=1):
-        print(
-            f"  フォールド {fold_idx}/{len(wf_splits)}: "
-            f"学習 {len(wf_train):,} 行  "
-            f"テスト {len(wf_test):,} 行  "
-            f"({wf_test['date'].min()} 〜 {wf_test['date'].max()})"
-        )
-        wf_models = model.train(wf_train)
-        wf_calibrated = _calib_mod.calibrate_models(wf_models, wf_test)
-        wf_pred = model.predict(wf_calibrated, wf_test)
-        wf_metrics = evaluation.evaluate(wf_test, wf_pred)
-        fold_results.append(
-            {
-                "fold": fold_idx,
-                "train_rows": len(wf_train),
-                "test_rows": len(wf_test),
-                "test_start": wf_test["date"].min(),
-                "test_end": wf_test["date"].max(),
-                **wf_metrics,
-            }
-        )
+        wf_splits = walk_forward_splits(df, n_splits=5)
+        fold_results = []
+        for fold_idx, (wf_train, wf_test) in enumerate(wf_splits, start=1):
+            print(
+                f"  フォールド {fold_idx}/{len(wf_splits)}: "
+                f"学習 {len(wf_train):,} 行  "
+                f"テスト {len(wf_test):,} 行  "
+                f"({wf_test['date'].min()} 〜 {wf_test['date'].max()})"
+            )
+            wf_models = model.train(wf_train)
+            wf_calibrated = _calib_mod.calibrate_models(wf_models, wf_test)
+            wf_pred = model.predict(wf_calibrated, wf_test)
+            wf_metrics = evaluation.evaluate(wf_test, wf_pred)
+            fold_results.append(
+                {
+                    "fold": fold_idx,
+                    "train_rows": len(wf_train),
+                    "test_rows": len(wf_test),
+                    "test_start": wf_test["date"].min(),
+                    "test_end": wf_test["date"].max(),
+                    **wf_metrics,
+                }
+            )
 
-    wf_summary = evaluation.walk_forward_summary(fold_results)
-    print(wf_summary.to_string())
+        wf_summary = evaluation.walk_forward_summary(fold_results)
+        print(wf_summary.to_string())
 
     print("モデルを保存中...")
     version_dir = model.save_models(models)
@@ -264,13 +265,14 @@ def predict_mode(race_id: str) -> None:
 
 def main() -> None:
     if len(sys.argv) < 2:
-        print("使い方: python -m predictor.main train | predict <race_id>")
+        print("使い方: python -m predictor.main train [--no-walkforward] | predict <race_id>")
         sys.exit(1)
 
     command = sys.argv[1]
 
     if command == "train":
-        train_mode()
+        walkforward = "--no-walkforward" not in sys.argv
+        train_mode(walkforward=walkforward)
     elif command == "predict":
         if len(sys.argv) < 3:
             print("使い方: python -m predictor.main predict <race_id>")
