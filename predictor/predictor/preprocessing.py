@@ -136,7 +136,8 @@ latest_all AS (
     avg_finish_last3, best_finish_last3, avg_last3f_last3,
     avg_finish_last5, best_finish_last5, avg_last3f_last5,
     avg_corner_last3, avg_corner_last5,
-    avg_last3f_rank_last3, avg_last3f_rank_last5
+    avg_last3f_rank_last3, avg_last3f_rank_last5,
+    distance AS prev_distance
   FROM windowed
   WHERE rn_all = 1
 ),
@@ -158,6 +159,7 @@ SELECT
   la.avg_finish_last5, la.best_finish_last5, la.avg_last3f_last5,
   la.avg_corner_last3, la.avg_corner_last5,
   la.avg_last3f_rank_last3, la.avg_last3f_rank_last5,
+  la.prev_distance,
   lc.avg_finish_last3_cond, lc.best_finish_last3_cond, lc.avg_last3f_last3_cond,
   lc.avg_finish_last5_cond, lc.best_finish_last5_cond, lc.avg_last3f_last5_cond,
   lc.avg_corner_last3_cond, lc.avg_corner_last5_cond,
@@ -388,6 +390,14 @@ def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFra
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
+    # 距離変化（前走との距離差）: predict 時は prev_distance が SQL から来る
+    if "prev_distance" in df.columns:
+        df["distance_change"] = (
+            pd.to_numeric(df["distance"], errors="coerce")
+            - pd.to_numeric(df["prev_distance"], errors="coerce")
+        )
+        df = df.drop(columns=["prev_distance"])
+
     # 性別・年齢の分離（例: '牡5' → sex='牡', age=5）
     df["sex"] = df["sex_age"].str.extract(r"^([^\d]+)")
     df["age"] = pd.to_numeric(df["sex_age"].str.extract(r"(\d+)$")[0], errors="coerce")
@@ -442,6 +452,13 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
     # ── 全レース共通: 直近3走・直近5走 ─────────────────────────────────────
     # 日付順に1回だけソートし、groupby().rolling() が各馬内で時系列順に動作するようにする
     df = df.sort_values(["horse_id", "date", "race_id"]).reset_index(drop=True)
+
+    # 距離変化（前走との距離差）
+    df["_dist_s"] = df.groupby("horse_id", observed=True)["distance"].shift(1)
+    df["distance_change"] = pd.to_numeric(df["distance"], errors="coerce") - pd.to_numeric(
+        df["_dist_s"], errors="coerce"
+    )
+    df = df.drop(columns=["_dist_s"])
 
     # 当該レースを除くため1つシフト（group 境界を超えない）
     df["_pos_s"] = df.groupby("horse_id", observed=True)["finishing_position"].shift(1)
@@ -617,6 +634,8 @@ def get_feature_columns() -> list[str]:
         "weight_carried",
         "horse_weight",
         "horse_weight_diff",
+        # 前走との比較
+        "distance_change",
         # 近走成績（全レース・直近3走）
         "avg_finish_last3",
         "best_finish_last3",
