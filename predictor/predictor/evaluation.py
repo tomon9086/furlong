@@ -6,6 +6,12 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import brier_score_loss, log_loss
 
+from predictor.simulation import (
+    DEFAULT_N_ITER as _MC_DEFAULT_N_ITER,
+    simulate_finishing_orders as _simulate_finishing_orders,
+    win_probability as _win_probability,
+)
+
 
 def evaluate(test_df: pd.DataFrame, pred_df: pd.DataFrame) -> dict[str, float]:
     """テストデータと予測結果から評価指標を計算する。
@@ -1024,3 +1030,116 @@ def ev_multi_bet_grid(
     df["人気帯"] = pd.Categorical(df["人気帯"], categories=tier_cat, ordered=True)
     df["券種"] = pd.Categorical(df["券種"], categories=bet_types, ordered=True)
     return df.set_index(["threshold", "人気帯", "券種"])
+
+
+# ---------------------------------------------------------------------------
+# フェーズ2: MC 単勝確率バックテストパイプライン
+# ---------------------------------------------------------------------------
+
+
+def compute_mc_win_probs(
+    pred_df: pd.DataFrame,
+    n_iter: int | None = None,
+    rng_seed: int | None = None,
+) -> pd.DataFrame:
+    """各レースの win_prob を MC でサンプリングして mc_win_prob カラムを追加して返す。
+
+    バックテスト用。既存の win_prob を Plackett-Luce サンプラーに入力し、
+    サンプリング後の単勝確率を mc_win_prob として算出する。
+
+    Plackett-Luce の性質上、n_iter が十分大きければ mc_win_prob ≈ win_prob
+    に収束する（サニティチェック用）。
+
+    Parameters
+    ----------
+    pred_df : pd.DataFrame
+        予測結果（race_id, horse_number, win_prob を含む）
+    n_iter : int | None
+        MC 試行回数。None の場合は simulation.DEFAULT_N_ITER（10,000）を使用。
+    rng_seed : int | None
+        乱数シード。再現性が必要な場合に指定（例: 42）。
+        None の場合は再現性なしで生成。
+
+    Returns
+    -------
+    pd.DataFrame
+        入力の pred_df に mc_win_prob カラムを追加したもの。
+    """
+    if n_iter is None:
+        n_iter = _MC_DEFAULT_N_ITER
+
+    rng = np.random.default_rng(rng_seed)
+    result = pred_df.copy()
+    result["mc_win_prob"] = np.nan
+
+    for _, group in pred_df.groupby("race_id"):
+        wp = group["win_prob"].values.astype(np.float64)
+        if not np.all(wp >= 0) or wp.sum() <= 0:
+            continue
+        orders = _simulate_finishing_orders(wp, n_iter=n_iter, rng=rng)
+        mc_wp = _win_probability(orders)
+        result.loc[group.index, "mc_win_prob"] = mc_wp
+
+    return result
+
+
+def mc_win_prob_comparison(pred_df_with_mc: pd.DataFrame) -> dict[str, float]:
+    """MC 単勝確率と直接の win_prob の差分統計を返す（サニティチェック用）。
+
+    Plackett-Luce サンプリングでは、入力 win_prob と MC 後の mc_win_prob は
+    n_iter が十分大きければ一致するはず。
+    大きな乖離がある場合は実装に問題があるか n_iter が不足している。
+
+    Parameters
+    ----------
+    pred_df_with_mc : pd.DataFrame
+        compute_mc_win_probs の出力（win_prob と mc_win_prob カラムを含む）
+
+    Returns
+    -------
+    dict[str, float]
+        mean_abs_diff : 絶対差分の平均
+        max_abs_diff  : 絶対差分の最大値
+        correlation   : win_prob と mc_win_prob のピアソン相関係数
+        mean_win_prob : win_prob の平均（参考値）
+    """
+    valid = pred_df_with_mc[["win_prob", "mc_win_prob"]].dropna()
+    diff = (valid["mc_win_prob"] - valid["win_prob"]).abs()
+    corr = float(valid["win_prob"].corr(valid["mc_win_prob"]))
+    return {
+        "mean_abs_diff": float(diff.mean()),
+        "max_abs_diff": float(diff.max()),
+        "correlation": corr,
+        "mean_win_prob": float(valid["win_prob"].mean()),
+    }
+
+
+def mc_ev_filter_analysis(
+    test_df: pd.DataFrame,
+    pred_df_with_mc: pd.DataFrame,
+    thresholds: list[float] | None = None,
+) -> pd.DataFrame:
+    """MC 単勝確率を使った期待値フィルタ付き回収率分析。
+
+    ev_filter_analysis と同等だが、win_prob の代わりに mc_win_prob × odds で
+    EV を算出する。
+
+    Parameters
+    ----------
+    test_df : pd.DataFrame
+        テストデータ（race_id, horse_number, is_win, odds を含む。
+        popularity カラムがある場合は人気帯別集計も行う）
+    pred_df_with_mc : pd.DataFrame
+        compute_mc_win_probs の出力（mc_win_prob カラムを含む）
+    thresholds : list[float] | None
+        EV 閾値リスト。None の場合はデフォルト値を使用。
+
+    Returns
+    -------
+    pd.DataFrame
+        ev_filter_analysis と同じ形式の DataFrame。
+    """
+    pred_mc = pred_df_with_mc[["race_id", "horse_number", "mc_win_prob"]].rename(
+        columns={"mc_win_prob": "win_prob"}
+    )
+    return ev_filter_analysis(test_df, pred_mc, thresholds=thresholds)

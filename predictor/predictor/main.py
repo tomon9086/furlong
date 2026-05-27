@@ -132,6 +132,26 @@ def train_mode(walkforward: bool = True) -> None:
     if not boot_ci.empty:
         print(boot_ci.to_string())
 
+    # フェーズ2: MC 単勝確率バックテスト
+    print("MC 単勝確率を算出中（n_iter=10,000, seed=42）...")
+    pred_df_mc = evaluation.compute_mc_win_probs(pred_df, rng_seed=42)
+    mc_diff = evaluation.mc_win_prob_comparison(pred_df_mc)
+    print("--- MC 単勝確率 vs 直接 win_prob（サニティチェック）---")
+    for k, v in mc_diff.items():
+        print(f"  {k}: {v:.6f}")
+
+    mc_ev_analysis = evaluation.mc_ev_filter_analysis(test_df, pred_df_mc)
+    print(
+        "--- 期待値フィルタ別（MC単勝確率使用, EV基準: mc_win_prob × race_results.odds）---"
+    )
+    if isinstance(mc_ev_analysis.index, pd.MultiIndex):
+        for metric in ["回収率", "推奨数", "的中率", "カバレッジ"]:
+            if metric in mc_ev_analysis.columns:
+                print(f"\n{metric}:")
+                print(mc_ev_analysis[metric].unstack("人気帯").to_string())
+    else:
+        print(mc_ev_analysis.to_string())
+
     print("払戻データを読み込み中...")
     test_race_ids = test_df["race_id"].unique().tolist()
     payoffs_df = load_payoffs(DATABASE_URL, test_race_ids)
