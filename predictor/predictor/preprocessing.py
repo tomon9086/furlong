@@ -359,6 +359,13 @@ def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFra
         df["passing_order"].apply(_parse_first_corner), errors="coerce"
     )
 
+    # 馬体重のレース内相対値（z-score: レース内で正規化）
+    _hw_mean = df.groupby("race_id")["horse_weight"].transform("mean")
+    _hw_std = df.groupby("race_id")["horse_weight"].transform("std")
+    df["horse_weight_relative"] = (df["horse_weight"] - _hw_mean) / _hw_std.where(
+        _hw_std > 0
+    )
+
     # last_3f のレース内相対順位（順位1 = 最速）
     df["last_3f_rank"] = df.groupby("race_id")["last_3f"].rank(
         method="min", ascending=True, na_option="keep"
@@ -653,6 +660,7 @@ def get_feature_columns() -> list[str]:
         "weight_carried",
         "horse_weight",
         "horse_weight_diff",
+        "horse_weight_relative",
         # 前走との比較
         "distance_change",
         "course_type_change",
