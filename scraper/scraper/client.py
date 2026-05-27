@@ -81,9 +81,27 @@ class NetkeibaClient:
         return self._get(url)
 
     def get_odds(self, race_id: str) -> str:
-        """単勝オッズページを取得してHTMLを返す."""
-        url = f"{_RACE_BASE_URL}/odds/index.html?race_id={race_id}"
-        return self._get(url)
+        """単勝オッズの JSON API レスポンスを取得して文字列として返す.
+
+        オッズページ (/odds/index.html) は数値を SSR せず JS で
+        api_get_jra_odds.html を叩いて埋めるため、同じ API を直接叩く。
+        """
+        url = f"{_RACE_BASE_URL}/api/api_get_jra_odds.html"
+        params = {
+            "pid": "api_get_jra_odds",
+            "input": "UTF-8",
+            "output": "json",
+            "race_id": race_id,
+            "type": "all",
+            "action": "init",
+            "sort": "ninki",
+            "compress": "0",
+        }
+        headers = {
+            "Referer": f"{_RACE_BASE_URL}/odds/index.html?race_id={race_id}",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        return self._get(url, params=params, headers=headers, encoding="utf-8")
 
     def get_race_list_by_date(self, kaisai_date: str) -> str:
         """開催日指定でレース一覧ページを取得してHTMLを返す (race.netkeiba.com).
@@ -94,7 +112,14 @@ class NetkeibaClient:
         url = f"{_RACE_BASE_URL}/top/race_list.html?kaisai_date={kaisai_date}"
         return self._get(url)
 
-    def _get(self, url: str) -> str:
+    def _get(
+        self,
+        url: str,
+        *,
+        params: dict | None = None,
+        headers: dict | None = None,
+        encoding: str = "euc-jp",
+    ) -> str:
         """レートリミット・リトライ付きHTTP GETリクエスト."""
         last_exc: Exception | None = None
 
@@ -113,7 +138,7 @@ class NetkeibaClient:
 
             try:
                 logger.debug("GET %s", url)
-                response = self._client.get(url)
+                response = self._client.get(url, params=params, headers=headers)
                 self._last_request_time = time.monotonic()
 
                 if response.status_code in _RETRY_STATUS:
@@ -128,8 +153,7 @@ class NetkeibaClient:
                     continue
 
                 response.raise_for_status()
-                # netkeiba は EUC-JP
-                return response.content.decode("euc-jp", errors="replace")
+                return response.content.decode(encoding, errors="replace")
 
             except httpx.RequestError as e:
                 last_exc = e
