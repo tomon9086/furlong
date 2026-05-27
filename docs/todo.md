@@ -11,7 +11,7 @@
 ### フェーズ4: lambdarank 化／特徴量追加で確率の質を底上げ
 
 - [x] `model.py` をレース内順位学習（lambdarank, group=レース単位）へ変更する検討・実装（[improvement_plan.md](./improvement_plan.md) B-4）
-- [ ] 特徴量追加: 距離変化（前走距離との差）を `preprocessing.py` に実装し `get_feature_columns` に追加
+- [x] 特徴量追加: 距離変化（前走距離との差）を `preprocessing.py` に実装し `get_feature_columns` に追加
 - [ ] 特徴量追加: コース替わり（前走 `course_type` からの変更フラグ）
 - [ ] 特徴量追加: 馬体重のレース内相対値（`horse_weight` をレース内で正規化）
 - [ ] 特徴量追加: 騎手乗り替わりフラグ（前走と騎手が異なるか）
