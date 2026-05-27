@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import lightgbm as lgb
+import numpy as np
 import pandas as pd
 
 from predictor.calibration import CalibratedModels
@@ -15,6 +16,7 @@ from predictor.preprocessing import get_feature_columns
 
 _MODEL_DIR = Path(__file__).parent.parent / "models"
 
+# 複勝モデル用パラメータ（binary classification）
 _PARAMS: dict = {
     "objective": "binary",
     "metric": "binary_logloss",
@@ -27,12 +29,34 @@ _PARAMS: dict = {
     "min_child_samples": 20,
 }
 
+# 勝ち順位モデル用パラメータ（lambdarank: レース内順位を直接最適化）
+_RANK_PARAMS: dict = {
+    "objective": "lambdarank",
+    "metric": "ndcg",
+    "verbosity": -1,
+    "learning_rate": 0.05,
+    "num_leaves": 63,
+    "feature_fraction": 0.8,
+    "bagging_fraction": 0.8,
+    "bagging_freq": 5,
+    "min_child_samples": 20,
+    "ndcg_eval_at": [1, 3, 5],
+    # 線形ゲイン: 日本競馬の最大出走頭数 18 頭に対応（デフォルトの指数ゲインより均一に寄与）
+    "label_gain": list(range(18)),
+}
+
 _NUM_BOOST_ROUND = 500
 
 
 class Models(NamedTuple):
     win: lgb.Booster
     place: lgb.Booster
+
+
+def _softmax(arr: np.ndarray) -> np.ndarray:
+    """数値安定な softmax を返す（lambdarank スコアの確率変換に使用）。"""
+    e = np.exp(arr - arr.max())
+    return e / e.sum()
 
 
 def _build_dataset(df: pd.DataFrame, label_col: str) -> lgb.Dataset:
@@ -48,12 +72,50 @@ def _build_dataset(df: pd.DataFrame, label_col: str) -> lgb.Dataset:
     )
 
 
+def _build_rank_dataset(df: pd.DataFrame) -> lgb.Dataset:
+    """lambdarank 用データセットを構築する（group=レース単位）。
+
+    レース内の着順から関連度ラベルを計算し、レース単位のグループ情報を付与する。
+    関連度ラベル: 勝ち馬 = (出走頭数 - 1)、最下位 = 0。
+    LightGBM は group 内でのみラベルを比較するため、頭数が異なるレース間での
+    ラベル値の差は問題にならない。
+    """
+    # レース・馬番順にソートしてグループの連続性を保証
+    df_s = df.sort_values(["race_id", "horse_number"]).reset_index(drop=True)
+
+    features = get_feature_columns()
+    available = [f for f in features if f in df_s.columns]
+    X = df_s[available].copy()
+    cat_cols = [c for c in X.columns if X[c].dtype.name == "category"]
+
+    # 関連度ラベル: レース内最大着順 - 着順 (非負整数, 勝ち馬が最大値)
+    rank_label = (
+        df_s.groupby("race_id")["finishing_position"].transform("max")
+        - df_s["finishing_position"]
+    ).astype(int)
+
+    # グループサイズ: レース単位の出走頭数（race_id 昇順 = df_s の行順と一致）
+    group = df_s.groupby("race_id")["horse_number"].count().tolist()
+
+    return lgb.Dataset(
+        X,
+        label=rank_label,
+        group=group,
+        categorical_feature=cat_cols if cat_cols else "auto",
+        free_raw_data=False,
+    )
+
+
 def train(train_df: pd.DataFrame) -> Models:
-    """学習データで勝ち・複勝 LightGBM モデルを学習する。"""
-    win_ds = _build_dataset(train_df, "is_win")
+    """学習データで lambdarank (勝ち順位) と binary (複勝) の LightGBM モデルを学習する。
+
+    勝ちモデル: lambdarank でレース内順位を直接最適化（group=レース単位）。
+    複勝モデル: 従来どおり binary classification。
+    """
+    rank_ds = _build_rank_dataset(train_df)
     place_ds = _build_dataset(train_df, "is_placed")
 
-    win_model = lgb.train(_PARAMS, win_ds, num_boost_round=_NUM_BOOST_ROUND)
+    win_model = lgb.train(_RANK_PARAMS, rank_ds, num_boost_round=_NUM_BOOST_ROUND)
     place_model = lgb.train(_PARAMS, place_ds, num_boost_round=_NUM_BOOST_ROUND)
 
     return Models(win=win_model, place=place_model)
@@ -146,9 +208,16 @@ def predict(models: Models | CalibratedModels, df: pd.DataFrame) -> pd.DataFrame
     if "horse_name" in df.columns:
         result["horse_name"] = df["horse_name"].values
     result["win_prob"] = win_probs
-    result["win_prob"] = result["win_prob"] / result.groupby("race_id")[
-        "win_prob"
-    ].transform("sum")
+    if isinstance(models, CalibratedModels):
+        # 較正済みモデル: [0,1] の較正済み確率をレース内合計で正規化
+        result["win_prob"] = result["win_prob"] / result.groupby("race_id")[
+            "win_prob"
+        ].transform("sum")
+    else:
+        # 未較正モデル (lambdarank スコアは任意の実数): softmax でレース内正規化
+        result["win_prob"] = result.groupby("race_id")["win_prob"].transform(
+            lambda g: _softmax(g.to_numpy())
+        )
     result["place_prob"] = place_probs
     result["predicted_rank"] = (
         result.groupby("race_id")["win_prob"]
