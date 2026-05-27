@@ -228,7 +228,6 @@ FROM race_results rr
 JOIN races r ON rr.race_id = r.race_id
 WHERE rr.finishing_position ~ '^[0-9]+$'
   AND rr.bracket_number ~ '^[0-9]+$'
-  AND r.distance ~ '^[0-9]+$'
   AND CASE
     WHEN r.distance::integer <= 1400 THEN 0
     WHEN r.distance::integer <= 1800 THEN 1
