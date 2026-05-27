@@ -75,8 +75,7 @@ WITH race_last3f AS (
 ),
 history AS (
   SELECT
-    rr.horse_id,
-    TO_DATE(r.date, 'YYYY/MM/DD') AS race_date,
+    rr.horse_id,    rr.jockey_id,    TO_DATE(r.date, 'YYYY/MM/DD') AS race_date,
     r.race_id,
     r.course_type,
     r.distance,
@@ -93,6 +92,7 @@ history AS (
 windowed AS (
   SELECT
     horse_id,
+    jockey_id,
     course_type,
     distance,
     AVG(finishing_pos) OVER w3  AS avg_finish_last3,
@@ -138,7 +138,8 @@ latest_all AS (
     avg_corner_last3, avg_corner_last5,
     avg_last3f_rank_last3, avg_last3f_rank_last5,
     distance AS prev_distance,
-    course_type AS prev_course_type
+    course_type AS prev_course_type,
+    jockey_id AS prev_jockey_id
   FROM windowed
   WHERE rn_all = 1
 ),
@@ -162,6 +163,7 @@ SELECT
   la.avg_last3f_rank_last3, la.avg_last3f_rank_last5,
   la.prev_distance,
   la.prev_course_type,
+  la.prev_jockey_id,
   lc.avg_finish_last3_cond, lc.best_finish_last3_cond, lc.avg_last3f_last3_cond,
   lc.avg_finish_last5_cond, lc.best_finish_last5_cond, lc.avg_last3f_last5_cond,
   lc.avg_corner_last3_cond, lc.avg_corner_last5_cond,
@@ -417,6 +419,16 @@ def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFra
         ).astype(float)
         df = df.drop(columns=["prev_course_type"])
 
+    # 騎手乗り替わりフラグ（前走と騎手が異なるか）: predict 時は prev_jockey_id が SQL から来る
+    if "prev_jockey_id" in df.columns:
+        has_prev = df["prev_jockey_id"].notna()
+        df["jockey_change"] = float("nan")
+        df.loc[has_prev, "jockey_change"] = (
+            df.loc[has_prev, "jockey_id"].astype(str)
+            != df.loc[has_prev, "prev_jockey_id"].astype(str)
+        ).astype(float)
+        df = df.drop(columns=["prev_jockey_id"])
+
     # 性別・年齢の分離（例: '牡5' → sex='牡', age=5）
     df["sex"] = df["sex_age"].str.extract(r"^([^\d]+)")
     df["age"] = pd.to_numeric(df["sex_age"].str.extract(r"(\d+)$")[0], errors="coerce")
@@ -485,6 +497,13 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
     df["course_type_change"] = (~same_course).astype(float)
     df.loc[df["_course_s"].isna(), "course_type_change"] = float("nan")
     df = df.drop(columns=["_course_s"])
+
+    # 騎手乗り替わりフラグ（前走と騎手が異なるか）
+    df["_jockey_s"] = df.groupby("horse_id", observed=True)["jockey_id"].shift(1)
+    same_jockey = df["jockey_id"] == df["_jockey_s"]
+    df["jockey_change"] = (~same_jockey).astype(float)
+    df.loc[df["_jockey_s"].isna(), "jockey_change"] = float("nan")
+    df = df.drop(columns=["_jockey_s"])
 
     # 当該レースを除くため1つシフト（group 境界を超えない）
     df["_pos_s"] = df.groupby("horse_id", observed=True)["finishing_position"].shift(1)
@@ -664,6 +683,7 @@ def get_feature_columns() -> list[str]:
         # 前走との比較
         "distance_change",
         "course_type_change",
+        "jockey_change",
         # 近走成績（全レース・直近3走）
         "avg_finish_last3",
         "best_finish_last3",
