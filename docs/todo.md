@@ -8,16 +8,6 @@
 > 計画: [plan/prediction-accuracy-followup.md](./plan/prediction-accuracy-followup.md)
 > 目的は精度でなく回収率。「割安な対象（EV > 1）を選んで買う」ベット選択が中核。
 
-### フェーズ4: lambdarank 化／特徴量追加で確率の質を底上げ
-
-- [x] `model.py` をレース内順位学習（lambdarank, group=レース単位）へ変更する検討・実装（[improvement_plan.md](./improvement_plan.md) B-4）
-- [x] 特徴量追加: 距離変化（前走距離との差）を `preprocessing.py` に実装し `get_feature_columns` に追加
-- [x] 特徴量追加: コース替わり（前走 `course_type` からの変更フラグ）
-- [x] 特徴量追加: 馬体重のレース内相対値（`horse_weight` をレース内で正規化）
-- [x] 特徴量追加: 騎手乗り替わりフラグ（前走と騎手が異なるか）
-- [x] 特徴量追加: 枠順 × 距離の有利不利（距離帯ごとの枠番別平均着順の交互作用）
-- [ ] 再学習し、回収率（フェーズ3の指標）への効果を測定
-
 ## モンテカルロ着順シミュレーション
 
 > 計画: [plan/ensemble-montecarlo.md](./plan/ensemble-montecarlo.md)
