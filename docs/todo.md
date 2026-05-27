@@ -15,10 +15,10 @@
 
 ### フェーズ1: 薄い MC 実装（当たり判定のための最小実装）
 
-- [ ] `predictor/predictor/simulation.py` を新設し、各馬の能力分布から着順をサンプリングする MC コア関数 `simulate_finishing_orders(win_probs, n_iter, rng)` を実装する（入力: レース内の `win_prob` ベクトル、出力: 着順サンプル列）
-- [ ] サンプリング方式を決め、spec.md に記録する（候補: ① Plackett-Luce（`win_prob` を強度パラメータとみなし無置換抽選）／② 各馬に能力スコア + ガンベルノイズで argsort）
-- [ ] MC サンプル列から馬券種ごとの確率を集計する関数群を実装（単勝・複勝の確率算出。組合せ系はフェーズ3）
-- [ ] `n_iter`（試行回数）のデフォルト値と再現性のための乱数シード方針を spec.md に記録する
+- [x] `predictor/predictor/simulation.py` を新設し、各馬の能力分布から着順をサンプリングする MC コア関数 `simulate_finishing_orders(win_probs, n_iter, rng)` を実装する（入力: レース内の `win_prob` ベクトル、出力: 着順サンプル列）
+- [x] サンプリング方式を決め、spec.md に記録する（候補: ① Plackett-Luce（`win_prob` を強度パラメータとみなし無置換抽選）／② 各馬に能力スコア + ガンベルノイズで argsort）
+- [x] MC サンプル列から馬券種ごとの確率を集計する関数群を実装（単勝・複勝の確率算出。組合せ系はフェーズ3）
+- [x] `n_iter`（試行回数）のデフォルト値と再現性のための乱数シード方針を spec.md に記録する
 
 ### フェーズ2: MC 単勝確率の妥当性検証（当たり判定）
 

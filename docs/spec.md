@@ -272,3 +272,28 @@ furlong/
 | 複勝 | `place_prob` 上位3頭 |
 | 馬連・馬単 | `predicted_rank` 1・2位の組み合わせ |
 | 三連複・三連単 | `predicted_rank` 1〜3位の組み合わせ |
+
+---
+
+## モンテカルロ着順シミュレーション
+
+### サンプリング方式
+
+**Plackett-Luce（Gumbel max trick）** を採用する。
+
+各馬のスコアを以下の式で算出し、降順に並べた順序を着順とする：
+
+$$\text{score}_i = \log(\text{win\_prob}_i) + G_i, \quad G_i \sim \text{Gumbel}(0, 1)$$
+
+- $G_i = -\log(-\log(U_i)), \quad U_i \sim \text{Uniform}(0, 1)$
+- 1回のシミュレーションで全馬の着順が一括算出される（効率的なベクトル演算が可能）。
+- ガンベルノイズを加えた argsort により、Plackett-Luce 分布からの正確なサンプリングと等価になる。
+
+候補② の「能力スコア + ガンベルノイズで argsort」と実質同一の手法だが、`log(win_prob)` を能力スコアとみなすことで候補① の Plackett-Luce とも整合する。
+
+### パラメータ方針
+
+| パラメータ | デフォルト値 | 方針 |
+|---|---|---|
+| `n_iter` | 10,000 | 1レース 18 頭で標準誤差 ≈ 0.5% 未満。速度と精度のバランス点。 |
+| `rng` | `None`（再現性なし） | 呼び出し側から `np.random.default_rng(seed)` を渡すことで固定できる。バックテストや検証時は固定シードを推奨。 |
