@@ -44,6 +44,15 @@
 - [x] `predictor/predictor/output.py` の推奨買い目算出を MC ベースに置き換える／追加する（事前オッズ × MC 確率で組合せ馬券の EV を計算）
 - [x] CSV 出力スキーマに券種別の推奨買い目カラムを追加し、spec.md「出力」を更新
 
+### フェーズ4 リファクタ: output.py の確率ソース整理
+
+> 検証結果: mc_win_prob ≈ win_prob（相関 0.9986、平均差 0.002）のため、単勝・複勝の確率は直接モデル出力を使う方がシンプル。MC は組合せ馬券専用に絞る。
+
+- [ ] `_mark_recommended` 内の `mc_win_prob` 計算を削除し、単勝 EV 判定を `win_prob * win_odds` に変更する（`_win_probability(orders)` の呼び出しを除去）
+- [ ] 同様に `mc_place_prob` を削除し、複勝推奨を `place_prob` 上位3頭に変更する（`_place_probability(orders)` の呼び出しを除去）
+- [ ] `simulation.py` の `win_probability`・`place_probability` 関数が `output.py` から参照されなくなることを確認し、import から除去する
+- [ ] CSV 出力カラムから `mc_win_prob`・`mc_place_prob`・`mc_ev` を削除し、代わりに `ev`（= `win_prob * win_odds`）を出力するよう変更する（spec.md「出力」も更新）
+
 ## predict コマンド改善
 
 ### 事前オッズ自動取得
