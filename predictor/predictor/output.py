@@ -78,8 +78,14 @@ def _mark_recommended(
             df.loc[idx[best_pos], "recommended_win"] = True
 
         # 複勝: place_prob 上位3頭
-        place_prob_vals = group["place_prob"].to_numpy(dtype=float) if "place_prob" in group.columns else win_probs_raw
-        place_ranks = pd.Series(place_prob_vals, index=idx).rank(ascending=False, method="min")
+        place_prob_vals = (
+            group["place_prob"].to_numpy(dtype=float)
+            if "place_prob" in group.columns
+            else win_probs_raw
+        )
+        place_ranks = pd.Series(place_prob_vals, index=idx).rank(
+            ascending=False, method="min"
+        )
         df.loc[place_ranks[place_ranks <= 3].index, "recommended_place"] = True
 
         # 馬連: MC 馬連確率最大ペア
