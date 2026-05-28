@@ -48,10 +48,10 @@
 
 > 検証結果: mc_win_prob ≈ win_prob（相関 0.9986、平均差 0.002）のため、単勝・複勝の確率は直接モデル出力を使う方がシンプル。MC は組合せ馬券専用に絞る。
 
-- [ ] `_mark_recommended` 内の `mc_win_prob` 計算を削除し、単勝 EV 判定を `win_prob * win_odds` に変更する（`_win_probability(orders)` の呼び出しを除去）
-- [ ] 同様に `mc_place_prob` を削除し、複勝推奨を `place_prob` 上位3頭に変更する（`_place_probability(orders)` の呼び出しを除去）
-- [ ] `simulation.py` の `win_probability`・`place_probability` 関数が `output.py` から参照されなくなることを確認し、import から除去する
-- [ ] CSV 出力カラムから `mc_win_prob`・`mc_place_prob`・`mc_ev` を削除し、代わりに `ev`（= `win_prob * win_odds`）を出力するよう変更する（spec.md「出力」も更新）
+- [x] `_mark_recommended` 内の `mc_win_prob` 計算を削除し、単勝 EV 判定を `win_prob * win_odds` に変更する（`_win_probability(orders)` の呼び出しを除去）
+- [x] 同様に `mc_place_prob` を削除し、複勝推奨を `place_prob` 上位3頭に変更する（`_place_probability(orders)` の呼び出しを除去）
+- [x] `simulation.py` の `win_probability`・`place_probability` 関数が `output.py` から参照されなくなることを確認し、import から除去する
+- [x] CSV 出力カラムから `mc_win_prob`・`mc_place_prob`・`mc_ev` を削除し、代わりに `ev`（= `win_prob * win_odds`）を出力するよう変更する（spec.md「出力」も更新）
 
 ## predict コマンド改善
 
