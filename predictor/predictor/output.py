@@ -13,8 +13,6 @@ from predictor.simulation import (
     simulate_finishing_orders as _simulate_finishing_orders,
     trifecta_box_probability as _trifecta_box_probability,
     wide_probability as _wide_probability,
-    place_probability as _place_probability,
-    win_probability as _win_probability,
 )
 
 _OUTPUT_DIR = Path("output")
@@ -45,9 +43,7 @@ def _mark_recommended(
     else:
         odds_col = None
 
-    df["mc_win_prob"] = np.nan
-    df["mc_place_prob"] = np.nan
-    df["mc_ev"] = np.nan
+    df["ev"] = np.nan
     df["recommended_win"] = False
     df["recommended_place"] = False
     df["recommended_quinella"] = False
@@ -67,27 +63,23 @@ def _mark_recommended(
             win_probs, n_iter=_MC_DEFAULT_N_ITER, rng=rng
         )
 
-        mc_win = _win_probability(orders)
-        mc_place = _place_probability(orders)
-        df.loc[idx, "mc_win_prob"] = mc_win
-        df.loc[idx, "mc_place_prob"] = mc_place
-
-        # 単勝 EV（mc_win_prob × win_odds）
+        # 単勝 EV（win_prob × win_odds）
         if odds_col is not None:
             win_odds_vals = group[odds_col].to_numpy(dtype=float)
-            mc_ev_vals = mc_win * win_odds_vals
-            df.loc[idx, "mc_ev"] = mc_ev_vals
-            ev_mask = mc_ev_vals > _EV_THRESHOLD
+            ev_vals = win_probs_raw * win_odds_vals
+            df.loc[idx, "ev"] = ev_vals
+            ev_mask = ev_vals > _EV_THRESHOLD
             if ev_mask.any():
-                masked_mc_win = np.where(ev_mask, mc_win, -1.0)
-                best_pos = int(np.argmax(masked_mc_win))
+                masked_win = np.where(ev_mask, win_probs_raw, -1.0)
+                best_pos = int(np.argmax(masked_win))
                 df.loc[idx[best_pos], "recommended_win"] = True
         else:
-            best_pos = int(np.argmax(mc_win))
+            best_pos = int(np.argmax(win_probs_raw))
             df.loc[idx[best_pos], "recommended_win"] = True
 
-        # 複勝: mc_place_prob 上位3頭
-        place_ranks = pd.Series(mc_place, index=idx).rank(ascending=False, method="min")
+        # 複勝: place_prob 上位3頭
+        place_prob_vals = group["place_prob"].to_numpy(dtype=float) if "place_prob" in group.columns else win_probs_raw
+        place_ranks = pd.Series(place_prob_vals, index=idx).rank(ascending=False, method="min")
         df.loc[place_ranks[place_ranks <= 3].index, "recommended_place"] = True
 
         # 馬連: MC 馬連確率最大ペア
@@ -149,8 +141,8 @@ def print_prediction(pred_df: pd.DataFrame) -> None:
     ]
     if "horse_name" in df.columns:
         display_cols.insert(1, "horse_name")
-    if "mc_ev" in df.columns:
-        display_cols.insert(display_cols.index("recommended"), "mc_ev")
+    if "ev" in df.columns:
+        display_cols.insert(display_cols.index("recommended"), "ev")
 
     for race_id, group in df.groupby("race_id"):
         group = group.sort_values("predicted_rank")
@@ -168,12 +160,12 @@ def print_prediction(pred_df: pd.DataFrame) -> None:
             "horse_number"
         )
 
-        print("\n  推奨買い目 (MC ベース):")
+        print("\n  推奨買い目:")
         if win_horses.empty:
-            print(f"    単勝 : (MC EV しきい値 {_EV_THRESHOLD} 未達・推奨なし)")
+            print(f"    単勝 : (EV しきい値 {_EV_THRESHOLD} 未達・推奨なし)")
         else:
-            if "mc_ev" in win_horses.columns and not win_horses["mc_ev"].isna().all():
-                ev_str = f" (MC EV={float(win_horses['mc_ev'].iloc[0]):.2f})"
+            if "ev" in win_horses.columns and not win_horses["ev"].isna().all():
+                ev_str = f" (EV={float(win_horses['ev'].iloc[0]):.2f})"
             else:
                 ev_str = ""
             print(f"    単勝 : {win_horses['horse_number'].tolist()}{ev_str}")
