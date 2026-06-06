@@ -250,21 +250,20 @@ def predict_mode(race_id: str) -> None:
         else:
             sys.exit(1)
 
-    if raw["win_odds"].isna().all():
-        import subprocess
+    import subprocess
 
-        print(f"レース {race_id} の事前オッズが未取得です。自動取得を試みます...")
-        result = subprocess.run(
-            [sys.executable, "-m", "scraper.main", "odds", race_id],
-            cwd=None,
+    print(f"レース {race_id} の最新オッズを取得中...")
+    result = subprocess.run(
+        [sys.executable, "-m", "scraper.main", "odds", race_id],
+        cwd=None,
+    )
+    if result.returncode != 0:
+        print(
+            f"警告: レース {race_id} の最新オッズ取得に失敗しました。DB の既存オッズで予測を続行します。",
+            file=sys.stderr,
         )
-        if result.returncode != 0:
-            print(
-                f"警告: レース {race_id} の事前オッズ取得に失敗しました。EV は NaN のまま予測を続行します。",
-                file=sys.stderr,
-            )
-        else:
-            raw = load_predict_data(DATABASE_URL, race_id)
+    else:
+        raw = load_predict_data(DATABASE_URL, race_id)
 
     df = preprocess(raw, keep_null_position=True)
 
