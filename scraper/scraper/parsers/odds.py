@@ -20,8 +20,8 @@ class OddsParser(BaseParser):
             raise ValueError(f"オッズ JSON のパースに失敗しました: {e}") from e
 
         status = doc.get("status")
-        # "result" は確定オッズ、"middle" は発走前リアルタイムオッズ。どちらも有効。
-        if status not in ("result", "middle"):
+        # "result" は確定オッズ、"middle" は発走前リアルタイムオッズ、"yoso" は予想オッズ。いずれも有効。
+        if status not in ("result", "middle", "yoso"):
             reason = doc.get("reason", "")
             raise ValueError(
                 f"オッズデータが取得できませんでした (status={status}, reason={reason})"
