@@ -221,6 +221,79 @@ def _make_filename(
     return "prediction_" + "_".join(parts)
 
 
+def _toml_list(values: list) -> str:
+    """Python リストを TOML のインライン配列文字列に変換する。"""
+    return "[" + ", ".join(str(v) for v in values) + "]"
+
+
+def _format_betting_toml(pred_df: pd.DataFrame) -> str:
+    """予測結果と推奨買い目を TOML 文字列として生成する。
+
+    tomllib は読み込み専用のため、書き込みは手動フォーマットで行う。
+    読み込みは tomllib.loads() で行える。
+    """
+    df = pred_df  # already _mark_recommended されていることを前提とする
+
+    lines: list[str] = [f"ev_threshold = {_EV_THRESHOLD}\n"]
+
+    for race_id, group in df.groupby("race_id"):
+        group = group.sort_values("predicted_rank")
+
+        win_horses = group[group["recommended_win"]]
+        place_horses = group[group["recommended_place"]]
+        quinella_horses = group[group["recommended_quinella"]].sort_values(
+            "horse_number"
+        )
+        wide_horses = group[group["recommended_wide"]].sort_values("horse_number")
+        trifecta_horses = group[group["recommended_trifecta_box"]].sort_values(
+            "horse_number"
+        )
+
+        lines.append("[[race]]")
+        lines.append(f'race_id = "{race_id}"')
+        lines.append("")
+
+        lines.append("[race.betting]")
+
+        if win_horses.empty:
+            lines.append(
+                f'win = {{ horses = [], note = "EV threshold {_EV_THRESHOLD} not reached" }}'
+            )
+        else:
+            hn = win_horses["horse_number"].tolist()
+            if "ev" in win_horses.columns and not win_horses["ev"].isna().all():
+                ev_val = round(float(win_horses["ev"].iloc[0]), 4)
+                lines.append(f"win = {{ horses = {_toml_list(hn)}, ev = {ev_val} }}")
+            else:
+                lines.append(f"win = {{ horses = {_toml_list(hn)} }}")
+
+        lines.append(
+            f"place = {{ horses = {_toml_list(place_horses['horse_number'].tolist())} }}"
+        )
+
+        if len(quinella_horses) >= 2:
+            hn = quinella_horses["horse_number"].tolist()
+            lines.append(f"quinella = {{ horses = {_toml_list(hn)} }}")
+        else:
+            lines.append("quinella = { horses = [] }")
+
+        if len(wide_horses) >= 2:
+            hn = wide_horses["horse_number"].tolist()
+            lines.append(f"wide = {{ horses = {_toml_list(hn)} }}")
+        else:
+            lines.append("wide = { horses = [] }")
+
+        if len(trifecta_horses) >= 3:
+            hn = trifecta_horses["horse_number"].tolist()
+            lines.append(f"trifecta_box = {{ horses = {_toml_list(hn)} }}")
+        else:
+            lines.append("trifecta_box = { horses = [] }")
+
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def save_csv(
     pred_df: pd.DataFrame,
     race_id: str,
@@ -232,7 +305,38 @@ def save_csv(
     """予測結果を CSV ファイルに保存する。"""
     df = _mark_recommended(pred_df)
     output_dir.mkdir(parents=True, exist_ok=True)
-    filename = _make_filename(race_id, race_name=race_name, race_number=race_number, date=date)
+    filename = _make_filename(
+        race_id, race_name=race_name, race_number=race_number, date=date
+    )
     path = output_dir / f"{filename}.csv"
     df.sort_values(["race_id", "predicted_rank"]).to_csv(path, index=False)
     print(f"CSV 保存: {path}")
+
+
+def save_output(
+    pred_df: pd.DataFrame,
+    race_id: str,
+    output_dir: Path = _OUTPUT_DIR,
+    race_name: str | None = None,
+    race_number: str | None = None,
+    date: str | None = None,
+) -> None:
+    """予測結果を CSV + 買い目 TOML としてディレクトリ配下に保存する。
+
+    output_dir/<dirname>/prediction.csv
+    output_dir/<dirname>/betting.toml
+    """
+    df = _mark_recommended(pred_df)
+    filename = _make_filename(
+        race_id, race_name=race_name, race_number=race_number, date=date
+    )
+    race_dir = output_dir / filename
+    race_dir.mkdir(parents=True, exist_ok=True)
+
+    csv_path = race_dir / "prediction.csv"
+    df.sort_values(["race_id", "predicted_rank"]).to_csv(csv_path, index=False)
+    print(f"CSV 保存: {csv_path}")
+
+    toml_path = race_dir / "betting.toml"
+    toml_path.write_text(_format_betting_toml(df), encoding="utf-8")
+    print(f"TOML 保存: {toml_path}")

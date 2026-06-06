@@ -268,9 +268,21 @@ def predict_mode(race_id: str) -> None:
     df = preprocess(raw, keep_null_position=True)
 
     _raw_row = raw.iloc[0]
-    _race_name = str(_raw_row["race_name"]) if "race_name" in raw.columns and _raw_row["race_name"] is not None else None
-    _race_number = str(_raw_row["race_number"]) if "race_number" in raw.columns and _raw_row["race_number"] is not None else None
-    _race_date = str(_raw_row["date"]) if "date" in raw.columns and _raw_row["date"] is not None else None
+    _race_name = (
+        str(_raw_row["race_name"])
+        if "race_name" in raw.columns and _raw_row["race_name"] is not None
+        else None
+    )
+    _race_number = (
+        str(_raw_row["race_number"])
+        if "race_number" in raw.columns and _raw_row["race_number"] is not None
+        else None
+    )
+    _race_date = (
+        str(_raw_row["date"])
+        if "date" in raw.columns and _raw_row["date"] is not None
+        else None
+    )
 
     target = df[(df["race_id"] == race_id) & df["finishing_position"].isna()]
     if target.empty:
@@ -284,7 +296,7 @@ def predict_mode(race_id: str) -> None:
     pred_df = model.predict(models, target)
 
     output.print_prediction(pred_df)
-    output.save_csv(
+    output.save_output(
         pred_df,
         race_id,
         race_name=_race_name,
@@ -295,7 +307,9 @@ def predict_mode(race_id: str) -> None:
 
 def main() -> None:
     if len(sys.argv) < 2:
-        print("使い方: python -m predictor.main train [--no-walkforward] | predict <race_id>")
+        print(
+            "使い方: python -m predictor.main train [--no-walkforward] | predict <race_id>"
+        )
         sys.exit(1)
 
     command = sys.argv[1]
