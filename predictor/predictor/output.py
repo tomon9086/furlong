@@ -191,12 +191,48 @@ def print_prediction(pred_df: pd.DataFrame) -> None:
             print(f"    三連複: {hn[0]}-{hn[1]}-{hn[2]}")
 
 
+def _make_filename(
+    race_id: str,
+    race_name: str | None = None,
+    race_number: str | None = None,
+    date: str | None = None,
+) -> str:
+    """レース情報からファイル名用の文字列を生成する。"""
+    import re
+
+    # date: 'YYYY/MM/DD' など数字以外を除去して YYYYMMDD 形式に
+    date_str = ""
+    if date and str(date) not in ("", "None", "NaT", "nan"):
+        date_str = re.sub(r"[^0-9]", "", str(date))[:8]
+
+    # race_number: DB値がなければ race_id 末尾2桁から生成して NR 形式に
+    race_number_str = ""
+    if race_number and str(race_number) not in ("", "None", "NaT", "nan"):
+        race_number_str = re.sub(r"[^0-9A-Za-z]", "", str(race_number)) + "R"
+    elif len(race_id) >= 2:
+        n = race_id[-2:].lstrip("0") or "0"
+        race_number_str = n + "R"
+
+    race_name_str = ""
+    if race_name and str(race_name) not in ("", "None", "NaT", "nan"):
+        race_name_str = re.sub(r"[\s/\\:*?\"<>|]+", "_", str(race_name)).strip("_")
+
+    parts = [p for p in [date_str, race_number_str, race_name_str, race_id] if p]
+    return "prediction_" + "_".join(parts)
+
+
 def save_csv(
-    pred_df: pd.DataFrame, race_id: str, output_dir: Path = _OUTPUT_DIR
+    pred_df: pd.DataFrame,
+    race_id: str,
+    output_dir: Path = _OUTPUT_DIR,
+    race_name: str | None = None,
+    race_number: str | None = None,
+    date: str | None = None,
 ) -> None:
     """予測結果を CSV ファイルに保存する。"""
     df = _mark_recommended(pred_df)
     output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / f"prediction_{race_id}.csv"
+    filename = _make_filename(race_id, race_name=race_name, race_number=race_number, date=date)
+    path = output_dir / f"{filename}.csv"
     df.sort_values(["race_id", "predicted_rank"]).to_csv(path, index=False)
     print(f"CSV 保存: {path}")
