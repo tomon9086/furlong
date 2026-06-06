@@ -190,4 +190,19 @@ class ShutsubaParser(BaseParser):
                     info["グレード"] = grade_span.get_text(strip=True)
                     break
 
+        # title タグからのフォールバック（RaceData02 で取れなかった場合）
+        title_tag = soup.find("title")
+        if title_tag:
+            title_text = title_tag.get_text(strip=True)
+            if "日付" not in info:
+                m = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", title_text)
+                if m:
+                    info["日付"] = (
+                        f"{m.group(1)}/{m.group(2).zfill(2)}/{m.group(3).zfill(2)}"
+                    )
+            if "R" not in info:
+                m = re.search(r"(\d+)R", title_text)
+                if m:
+                    info["R"] = m.group(1)
+
         return info
