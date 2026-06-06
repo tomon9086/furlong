@@ -13,6 +13,7 @@ TEST_RATIO = 0.2
 _SELECT_COLS = """
     r.race_id,
     r.race_name,
+    r.race_number,
     r.date,
     r.venue,
     r.course_type,
