@@ -544,98 +544,54 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
     df.loc[df["_jockey_s"].isna(), "jockey_change"] = float("nan")
     df = df.drop(columns=["_jockey_s"])
 
-    # 当該レースを除くため1つシフト（group 境界を超えない）
-    df["_pos_s"] = df.groupby("horse_id", observed=True)["finishing_position"].shift(1)
-    df["_last3f_s"] = df.groupby("horse_id", observed=True)["last_3f"].shift(1)
-    df["_corner_s"] = df.groupby("horse_id", observed=True)["first_corner_pos"].shift(1)
-    df["_last3f_rank_s"] = df.groupby("horse_id", observed=True)["last_3f_rank"].shift(
-        1
+    # 直近3走・5走: shift(1..5) をまとめて計算（groupby().rolling() より大幅に高速）
+    # rolling(n, min_periods=1).mean/min は shift(1)..shift(n) の mean/min と等価
+    _roll_cols = ["finishing_position", "last_3f", "first_corner_pos", "last_3f_rank"]
+    _grp = df.groupby("horse_id", observed=True)
+    _all_shifts = pd.concat(
+        [_grp[_roll_cols].shift(k).add_suffix(f"__s{k}") for k in range(1, 6)],
+        axis=1,
     )
+    for n in [3, 5]:
+        _sub_pos = _all_shifts[[f"finishing_position__s{k}" for k in range(1, n + 1)]]
+        df[f"avg_finish_last{n}"] = _sub_pos.mean(axis=1, skipna=True)
+        df[f"best_finish_last{n}"] = _sub_pos.min(axis=1, skipna=True)
 
-    for n, suffix in [(3, ""), (5, "")]:
-        grp = df.groupby("horse_id", observed=True, sort=False)
-        df[f"avg_finish_last{n}{suffix}"] = (
-            grp["_pos_s"]
-            .rolling(n, min_periods=1)
-            .mean()
-            .reset_index(level=0, drop=True)
-        )
-        df[f"best_finish_last{n}{suffix}"] = (
-            grp["_pos_s"]
-            .rolling(n, min_periods=1)
-            .min()
-            .reset_index(level=0, drop=True)
-        )
-        df[f"avg_last3f_last{n}{suffix}"] = (
-            grp["_last3f_s"]
-            .rolling(n, min_periods=1)
-            .mean()
-            .reset_index(level=0, drop=True)
-        )
-        df[f"avg_corner_last{n}{suffix}"] = (
-            grp["_corner_s"]
-            .rolling(n, min_periods=1)
-            .mean()
-            .reset_index(level=0, drop=True)
-        )
-        df[f"avg_last3f_rank_last{n}"] = (
-            grp["_last3f_rank_s"]
-            .rolling(n, min_periods=1)
-            .mean()
-            .reset_index(level=0, drop=True)
-        )
+        _sub_l3f = _all_shifts[[f"last_3f__s{k}" for k in range(1, n + 1)]]
+        df[f"avg_last3f_last{n}"] = _sub_l3f.mean(axis=1, skipna=True)
 
-    df = df.drop(columns=["_pos_s", "_last3f_s", "_corner_s", "_last3f_rank_s"])
+        _sub_cor = _all_shifts[[f"first_corner_pos__s{k}" for k in range(1, n + 1)]]
+        df[f"avg_corner_last{n}"] = _sub_cor.mean(axis=1, skipna=True)
+
+        _sub_rnk = _all_shifts[[f"last_3f_rank__s{k}" for k in range(1, n + 1)]]
+        df[f"avg_last3f_rank_last{n}"] = _sub_rnk.mean(axis=1, skipna=True)
 
     # ── 同コース種別・同距離: 直近3走・直近5走 ──────────────────────────────
     cond_key = ["horse_id", "course_type", "distance"]
     df_cond = df.sort_values(cond_key + ["date", "race_id"])
 
-    df_cond = df_cond.assign(
-        _pos_s_c=df_cond.groupby(cond_key, observed=True)["finishing_position"].shift(
-            1
-        ),
-        _last3f_s_c=df_cond.groupby(cond_key, observed=True)["last_3f"].shift(1),
-        _corner_s_c=df_cond.groupby(cond_key, observed=True)["first_corner_pos"].shift(
-            1
-        ),
-        _last3f_rank_s_c=df_cond.groupby(cond_key, observed=True)["last_3f_rank"].shift(
-            1
-        ),
+    _grp_c = df_cond.groupby(cond_key, observed=True)
+    _all_shifts_c = pd.concat(
+        [_grp_c[_roll_cols].shift(k).add_suffix(f"__s{k}") for k in range(1, 6)],
+        axis=1,
     )
+    for n in [3, 5]:
+        _sub_pos = _all_shifts_c[
+            [f"finishing_position__s{k}" for k in range(1, n + 1)]
+        ]
+        df_cond[f"avg_finish_last{n}_cond"] = _sub_pos.mean(axis=1, skipna=True)
+        df_cond[f"best_finish_last{n}_cond"] = _sub_pos.min(axis=1, skipna=True)
 
-    for n, suffix in [(3, "_cond"), (5, "_cond")]:
-        grp_c = df_cond.groupby(cond_key, observed=True, sort=False)
-        df_cond[f"avg_finish_last{n}{suffix}"] = (
-            grp_c["_pos_s_c"]
-            .rolling(n, min_periods=1)
-            .mean()
-            .reset_index(level=[0, 1, 2], drop=True)
-        )
-        df_cond[f"best_finish_last{n}{suffix}"] = (
-            grp_c["_pos_s_c"]
-            .rolling(n, min_periods=1)
-            .min()
-            .reset_index(level=[0, 1, 2], drop=True)
-        )
-        df_cond[f"avg_last3f_last{n}{suffix}"] = (
-            grp_c["_last3f_s_c"]
-            .rolling(n, min_periods=1)
-            .mean()
-            .reset_index(level=[0, 1, 2], drop=True)
-        )
-        df_cond[f"avg_corner_last{n}{suffix}"] = (
-            grp_c["_corner_s_c"]
-            .rolling(n, min_periods=1)
-            .mean()
-            .reset_index(level=[0, 1, 2], drop=True)
-        )
-        df_cond[f"avg_last3f_rank_last{n}{suffix}"] = (
-            grp_c["_last3f_rank_s_c"]
-            .rolling(n, min_periods=1)
-            .mean()
-            .reset_index(level=[0, 1, 2], drop=True)
-        )
+        _sub_l3f = _all_shifts_c[[f"last_3f__s{k}" for k in range(1, n + 1)]]
+        df_cond[f"avg_last3f_last{n}_cond"] = _sub_l3f.mean(axis=1, skipna=True)
+
+        _sub_cor = _all_shifts_c[
+            [f"first_corner_pos__s{k}" for k in range(1, n + 1)]
+        ]
+        df_cond[f"avg_corner_last{n}_cond"] = _sub_cor.mean(axis=1, skipna=True)
+
+        _sub_rnk = _all_shifts_c[[f"last_3f_rank__s{k}" for k in range(1, n + 1)]]
+        df_cond[f"avg_last3f_rank_last{n}_cond"] = _sub_rnk.mean(axis=1, skipna=True)
 
     cond_stat_cols = [
         f"{stat}_last{n}_cond"
