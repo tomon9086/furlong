@@ -8,6 +8,11 @@
 > 計画: [plan/prediction-accuracy-followup.md](./plan/prediction-accuracy-followup.md)
 > 目的は精度でなく回収率。「割安な対象（EV > 1）を選んで買う」ベット選択が中核。
 
+- [ ] 較正を out-of-sample に修正: `split_by_date` を train/val/test 3分割にし、val で `calibrate_models`、test で評価する構成に変更する
+- [ ] Bootstrap CI 算出: `evaluation.py` に bootstrap 信頼区間関数を追加し、「EV≥2.0 × 7番人気以下 × 馬連」の 95% CI 下限が 100% を超えるか確認する
+- [ ] Walk-forward での馬連戦略安定性確認: walk-forward の各フォールドで「EV≥1.5 × 7番人気以下 × 馬連」回収率を測定し、全フォールドで安定しているか確認する
+- [ ] Optuna によるハイパーパラメータ最適化: `num_leaves`, `learning_rate`, `min_child_samples`, `feature_fraction` を探索。評価指標は walk-forward 平均回収率
+
 ## モンテカルロ着順シミュレーション
 
 > 計画: [plan/ensemble-montecarlo.md](./plan/ensemble-montecarlo.md)
