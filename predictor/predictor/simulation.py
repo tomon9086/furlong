@@ -49,7 +49,11 @@ def simulate_finishing_orders(
         rng = np.random.default_rng()
 
     n_horses = len(win_probs)
-    log_probs = np.log(win_probs)  # shape (n_horses,)
+    # win_prob=0 の馬（出走取消等）は log(0)=-inf になるが、
+    # score = -inf + Gumbel は常に他馬より低くなるため着順最下位に落ちる。
+    # np.errstate で意図的な -inf を警告なしに扱う。
+    with np.errstate(divide="ignore"):
+        log_probs = np.log(win_probs)  # shape (n_horses,)
 
     # Gumbel(0,1) サンプリング: -log(-log(U)), U ~ Uniform(0,1)
     # shape: (n_iter, n_horses)
