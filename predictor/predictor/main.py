@@ -14,9 +14,6 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 
 def train_mode(walkforward: bool = True) -> None:
     """学習モード: 全データを使ってモデルを学習し保存する。"""
-    import pandas as pd
-
-    from predictor import evaluation, model
     from predictor.preprocessing import (
         compute_recent_stats,
         load_data,
@@ -36,7 +33,13 @@ def train_mode(walkforward: bool = True) -> None:
 
     print("時系列分割中...")
     train_df, val_df, test_df = split_by_date(df)
-    print(f"  学習: {len(train_df):,} 行  バリデーション: {len(val_df):,} 行  テスト: {len(test_df):,} 行")
+    print(
+        f"  学習: {len(train_df):,} 行  バリデーション: {len(val_df):,} 行  テスト: {len(test_df):,} 行"
+    )
+
+    import pandas as pd
+
+    from predictor import evaluation, model
 
     print("モデルを学習中...")
     models = model.train(train_df)
