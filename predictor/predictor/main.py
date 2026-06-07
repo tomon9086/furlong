@@ -3,6 +3,8 @@
 import os
 import sys
 
+sys.stdout.reconfigure(line_buffering=True)  # パイプ経由でも即時フラッシュ
+
 from dotenv import load_dotenv
 
 load_dotenv()
