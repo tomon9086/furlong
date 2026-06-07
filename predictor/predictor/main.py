@@ -33,8 +33,8 @@ def train_mode(walkforward: bool = True) -> None:
     df = compute_recent_stats(df)
 
     print("時系列分割中...")
-    train_df, test_df = split_by_date(df)
-    print(f"  学習: {len(train_df):,} 行  テスト: {len(test_df):,} 行")
+    train_df, val_df, test_df = split_by_date(df)
+    print(f"  学習: {len(train_df):,} 行  バリデーション: {len(val_df):,} 行  テスト: {len(test_df):,} 行")
 
     print("モデルを学習中...")
     models = model.train(train_df)
@@ -48,7 +48,7 @@ def train_mode(walkforward: bool = True) -> None:
     print("確率較正中...")
     from predictor import calibration
 
-    calibrated = calibration.calibrate_models(models, test_df)
+    calibrated = calibration.calibrate_models(models, val_df)
 
     print("評価中（較正後）...")
     pred_df = model.predict(calibrated, test_df)

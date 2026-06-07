@@ -9,6 +9,8 @@ import psycopg
 
 # テストデータに使う直近の割合
 TEST_RATIO = 0.2
+# 較正（バリデーション）データに使う割合
+VAL_RATIO = 0.1
 
 _SELECT_COLS = """
     r.race_id,
@@ -793,20 +795,31 @@ def get_feature_columns() -> list[str]:
 
 
 def split_by_date(
-    df: pd.DataFrame, test_ratio: float = TEST_RATIO
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """時系列分割でトレーニング・テストデータに分割する。
+    df: pd.DataFrame,
+    val_ratio: float = VAL_RATIO,
+    test_ratio: float = TEST_RATIO,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """時系列分割でトレーニング・バリデーション・テストデータに3分割する。
 
-    直近 ``test_ratio`` 割のレースをテストデータとする。
+    直近 ``test_ratio`` 割をテストデータ、その直前 ``val_ratio`` 割を
+    バリデーションデータ（較正用）、残りをトレーニングデータとする。
+
+    Returns
+    -------
+    tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]
+        (train_df, val_df, test_df)
     """
     dates = df["date"].dropna().sort_values().unique()
-    split_idx = int(len(dates) * (1 - test_ratio))
-    split_date = dates[split_idx]
+    val_idx = int(len(dates) * (1 - val_ratio - test_ratio))
+    test_idx = int(len(dates) * (1 - test_ratio))
+    val_date = dates[val_idx]
+    test_date = dates[test_idx]
 
-    train_df = df[df["date"] < split_date].copy()
-    test_df = df[df["date"] >= split_date].copy()
+    train_df = df[df["date"] < val_date].copy()
+    val_df = df[(df["date"] >= val_date) & (df["date"] < test_date)].copy()
+    test_df = df[df["date"] >= test_date].copy()
 
-    return train_df, test_df
+    return train_df, val_df, test_df
 
 
 def walk_forward_splits(

@@ -276,18 +276,20 @@ class TestComputeRecentStats:
 
 class TestSplitByDate:
     def test_split_ratio(self):
-        dates = pd.date_range("2020-01-01", periods=10, freq="D")
-        df = pd.DataFrame({"date": dates, "x": range(10)})
-        train, test = split_by_date(df, test_ratio=0.2)
-        assert len(test) == 2
-        assert len(train) == 8
+        dates = pd.date_range("2020-01-01", periods=20, freq="D")
+        df = pd.DataFrame({"date": dates, "x": range(20)})
+        train, val, test = split_by_date(df, val_ratio=0.1, test_ratio=0.2)
+        assert len(test) == 4   # 20 * 0.2
+        assert len(val) == 2    # 20 * 0.1
+        assert len(train) == 14  # 残り
 
     def test_no_future_leak(self):
-        """訓練データの最大日付 < テストデータの最小日付であること。"""
-        dates = pd.date_range("2020-01-01", periods=10, freq="D")
-        df = pd.DataFrame({"date": dates, "x": range(10)})
-        train, test = split_by_date(df, test_ratio=0.2)
-        assert train["date"].max() < test["date"].min()
+        """train < val < test の日付順序が守られること。"""
+        dates = pd.date_range("2020-01-01", periods=20, freq="D")
+        df = pd.DataFrame({"date": dates, "x": range(20)})
+        train, val, test = split_by_date(df, val_ratio=0.1, test_ratio=0.2)
+        assert train["date"].max() < val["date"].min()
+        assert val["date"].max() < test["date"].min()
 
 
 # ──────────────────────────────────────────────
