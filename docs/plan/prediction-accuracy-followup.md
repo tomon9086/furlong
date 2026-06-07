@@ -21,9 +21,9 @@
 
 | レバー | 内容 | 現状 |
 |---|---|---|
-| **1. オッズの取得** | EV を計算する材料そのもの | **欠落（最優先）**。予測時にオッズ未取得で `ev` が常に NaN |
-| **2. 確率の較正（calibration）** | `EV = p × odds` の `p` が正確であること | 未評価。精度改善の本丸 |
-| **3. 賭け対象の選択** | EV 閾値・券種・人気帯で買い目を絞る | 枠は存在（`ev_filter_analysis`）。オッズが無く実質未稼働 |
+| **1. オッズの取得** | EV を計算する材料そのもの | **実装済み**。`pre_race_odds` から `win_odds` を取得し EV 計算まで動作 |
+| **2. 確率の較正（calibration）** | `EV = p × odds` の `p` が正確であること | IsotonicRegression による後段較正を実装済み。calibration curve で評価可能 |
+| **3. 賭け対象の選択** | EV 閾値・券種・人気帯で買い目を絞る | EV フィルタ（閾値1.5）＋MC シミュレーション推奨ロジック実装済み |
 
 全レース・全頭を買えば控除率（≒20%）の分だけ必ず負ける。**買わない判断**が回収率の中核。
 
@@ -46,9 +46,8 @@
 ## 今回のレビューで再確認した現状
 
 - `get_feature_columns()` に `odds` / `popularity` は**含まれていない**（[prediction-accuracy.md](./prediction-accuracy.md) の方針どおり意図的に除外済み。妥当）。
-- **ただし予測時にオッズを取得していない**（`_PREDICT_RACE_QUERY` は `finishing_position IS NULL` の出馬表行のみ取得）。
-  - → `predict` 出力で `ev` が常に NaN（今回も「EV しきい値 1.5 未達・推奨なし」）。**回収率最適化の出発点に立てていない**。
-- `model.py`：win / place を独立した2値分類で学習し、`win_prob` は後段でレース内正規化（sum=1）するのみ。レース内の相対順位を直接学習していない（→ lambdarank、[improvement_plan.md](../improvement_plan.md) B-4）。
+- ~~**ただし予測時にオッズを取得していない**~~ → **実装済み**（2026-05-25 以降）。`_PRE_RACE_ODDS_QUERY` で `pre_race_odds` テーブルから `win_odds` を取得し、`output.py` の EV 計算（`mc_win_prob × win_odds`）まで動作している。EV フィルタは機能している状態。
+- ~~`model.py`：win / place を独立した2値分類で学習~~ → **実装済み**。勝ちモデルは `objective=lambdarank`（レース内順位を直接最適化）、複勝モデルは `binary` の2モデル構成に変更済み（[improvement_plan.md](../improvement_plan.md) B-4 対応済み）。
 
 ## オッズの扱いの整理（重要）
 
