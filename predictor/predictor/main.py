@@ -12,6 +12,27 @@ load_dotenv()
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 
+def _run_wf_fold(args: tuple) -> dict:
+    """Walk-forward の1フォールドを実行するヘルパー（ProcessPoolExecutor 並列実行用）。"""
+    fold_idx, wf_train, wf_test = args
+    from predictor import calibration as _calib_mod
+    from predictor import evaluation
+    from predictor import model as _model
+
+    wf_models = _model.train(wf_train)
+    wf_calibrated = _calib_mod.calibrate_models(wf_models, wf_test)
+    wf_pred = _model.predict(wf_calibrated, wf_test)
+    wf_metrics = evaluation.evaluate(wf_test, wf_pred)
+    return {
+        "fold": fold_idx,
+        "train_rows": len(wf_train),
+        "test_rows": len(wf_test),
+        "test_start": wf_test["date"].min(),
+        "test_end": wf_test["date"].max(),
+        **wf_metrics,
+    }
+
+
 def train_mode(walkforward: bool = True) -> None:
     """学習モード: 全データを使ってモデルを学習し保存する。"""
     from predictor.preprocessing import (
@@ -183,31 +204,26 @@ def train_mode(walkforward: bool = True) -> None:
 
     if walkforward:
         print("--- Walk-forward（rolling）検証 ---")
-        from predictor import calibration as _calib_mod
+        from concurrent.futures import ProcessPoolExecutor
+
         from predictor.preprocessing import walk_forward_splits
 
         wf_splits = walk_forward_splits(df, n_splits=5)
-        fold_results = []
-        for fold_idx, (wf_train, wf_test) in enumerate(wf_splits, start=1):
+        fold_args = [
+            (fold_idx, wf_train, wf_test)
+            for fold_idx, (wf_train, wf_test) in enumerate(wf_splits, start=1)
+        ]
+        n_workers = min(len(fold_args), os.cpu_count() or 1)
+        print(f"  {len(fold_args)} フォールドを並列実行中 (workers={n_workers})...")
+        with ProcessPoolExecutor(max_workers=n_workers) as executor:
+            fold_results = list(executor.map(_run_wf_fold, fold_args))
+        fold_results.sort(key=lambda x: x["fold"])
+        for r in fold_results:
             print(
-                f"  フォールド {fold_idx}/{len(wf_splits)}: "
-                f"学習 {len(wf_train):,} 行  "
-                f"テスト {len(wf_test):,} 行  "
-                f"({wf_test['date'].min()} 〜 {wf_test['date'].max()})"
-            )
-            wf_models = model.train(wf_train)
-            wf_calibrated = _calib_mod.calibrate_models(wf_models, wf_test)
-            wf_pred = model.predict(wf_calibrated, wf_test)
-            wf_metrics = evaluation.evaluate(wf_test, wf_pred)
-            fold_results.append(
-                {
-                    "fold": fold_idx,
-                    "train_rows": len(wf_train),
-                    "test_rows": len(wf_test),
-                    "test_start": wf_test["date"].min(),
-                    "test_end": wf_test["date"].max(),
-                    **wf_metrics,
-                }
+                f"  フォールド {r['fold']}/{len(wf_splits)}: "
+                f"学習 {r['train_rows']:,} 行  "
+                f"テスト {r['test_rows']:,} 行  "
+                f"({r['test_start']} 〜 {r['test_end']})"
             )
 
         wf_summary = evaluation.walk_forward_summary(fold_results)
