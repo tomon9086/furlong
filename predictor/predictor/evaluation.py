@@ -473,6 +473,150 @@ def ev_filter_bootstrap_ci(
     return df.set_index(["threshold", "人気帯"])
 
 
+def ev_quinella_bootstrap_ci(
+    test_df: pd.DataFrame,
+    pred_df: pd.DataFrame,
+    payoffs_df: pd.DataFrame,
+    thresholds: list[float] | None = None,
+    n_bootstrap: int = 10_000,
+    ci: float = 0.95,
+    random_state: int | None = None,
+) -> pd.DataFrame:
+    """EV閾値 × 人気帯ごとの馬連回収率 bootstrap 信頼区間を算出する。
+
+    ``ev_multi_bet_grid`` と同じフィルタリングロジックを用いる。
+    各レースで top-1 馬の EV が閾値を超えた場合に top-2 馬の馬連1点を購入し、
+    レース単位でブートストラップを実施して回収率の 95% CI を算出する。
+
+    Parameters
+    ----------
+    test_df : pd.DataFrame
+        テストデータ（race_id, horse_number, odds を含む。
+        popularity カラムがある場合は人気帯別集計も行う）
+    pred_df : pd.DataFrame
+        予測結果（race_id, horse_number, win_prob を含む）
+    payoffs_df : pd.DataFrame
+        払戻データ（race_id, bet_type, combination, payout を含む）
+    thresholds : list[float] | None
+        EV閾値リスト。None の場合はデフォルト値を使用。
+    n_bootstrap : int
+        ブートストラップ試行回数。デフォルト 10000。
+    ci : float
+        信頼水準。デフォルト 0.95（95%信頼区間）。
+    random_state : int | None
+        乱数シード。
+
+    Returns
+    -------
+    pd.DataFrame
+        MultiIndex（threshold, 人気帯）を持つ DataFrame。
+        カラム: 推奨数・回収率・CI下限・CI上限・有意>100%・有意>110%。
+    """
+    if thresholds is None:
+        thresholds = [1.0, 1.2, 1.5, 2.0, 3.0]
+
+    use_popularity = "popularity" in test_df.columns
+    test_cols = ["race_id", "horse_number", "odds"]
+    if use_popularity:
+        test_cols.append("popularity")
+
+    merged = test_df[test_cols].merge(
+        pred_df[["race_id", "horse_number", "win_prob"]],
+        on=["race_id", "horse_number"],
+    )
+    merged["odds"] = pd.to_numeric(merged["odds"], errors="coerce")
+    merged["ev"] = merged["win_prob"] * merged["odds"]
+    merged["hn_int"] = (
+        pd.to_numeric(merged["horse_number"], errors="coerce").fillna(0).astype(int)
+    )
+
+    if use_popularity:
+        merged["popularity"] = pd.to_numeric(merged["popularity"], errors="coerce")
+        merged["popularity_tier"] = merged["popularity"].map(_pop_tier)
+
+    # payoffs 正規化マップを構築
+    payoffs = payoffs_df.copy()
+    payoffs["payout_value"] = payoffs["payout"].apply(_parse_payout)
+    payoffs["combination_norm"] = payoffs["combination"].apply(_normalize_combination)
+    payoff_map: dict[tuple[str, str, str], float] = payoffs.set_index(
+        ["race_id", "bet_type", "combination_norm"]
+    )["payout_value"].to_dict()
+
+    # 各レースの top-1 馬を事前算出（フィルタ用）
+    top1_idx = merged.groupby("race_id")["win_prob"].idxmax()
+    top1 = merged.loc[top1_idx].copy()
+
+    tier_order = ["全体"] + _POP_TIER_ORDER
+
+    def _build_bet_arrays(
+        race_ids: "set[str]",
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """指定レースの馬連ベット配列 (is_hit, payout_odds) を返す。
+
+        payout_odds = payout / 100（100円ベットあたりのオッズ換算）。
+        外れの場合は is_hit=0, payout_odds=0。
+        """
+        sub = merged[merged["race_id"].isin(race_ids)]
+        is_hit_list: list[float] = []
+        payout_odds_list: list[float] = []
+        for race_id, group in sub.groupby("race_id"):
+            top2 = group.nlargest(2, "win_prob")
+            if len(top2) < 2:
+                continue
+            nums = sorted(top2["hn_int"].tolist())
+            combo = f"{nums[0]}-{nums[1]}"
+            payout = payoff_map.get((race_id, "馬連", combo), float("nan"))
+            if pd.isna(payout):
+                is_hit_list.append(0.0)
+                payout_odds_list.append(0.0)
+            else:
+                is_hit_list.append(1.0)
+                payout_odds_list.append(payout / 100.0)
+        return np.array(is_hit_list), np.array(payout_odds_list)
+
+    rows = []
+    for thr in thresholds:
+        filtered_top1 = top1[top1["ev"] > thr]
+
+        for tier in tier_order:
+            if tier == "全体":
+                tier_top1 = filtered_top1
+            elif use_popularity:
+                tier_top1 = filtered_top1[filtered_top1["popularity_tier"] == tier]
+            else:
+                continue
+
+            race_ids = set(tier_top1["race_id"].tolist())
+            is_hit, payout_odds = _build_bet_arrays(race_ids)
+
+            result = bootstrap_recovery_ci(
+                is_hit,
+                payout_odds,
+                n_bootstrap=n_bootstrap,
+                ci=ci,
+                random_state=random_state,
+            )
+            rows.append(
+                {
+                    "threshold": thr,
+                    "人気帯": tier,
+                    "推奨数": result["n_bets"],
+                    "回収率": result["point_estimate"],
+                    f"CI下限({int(ci * 100)}%)": result["ci_lower"],
+                    f"CI上限({int(ci * 100)}%)": result["ci_upper"],
+                    "有意>100%": result["above_100"],
+                    "有意>110%": result["above_110"],
+                }
+            )
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    tier_cat = tier_order if use_popularity else ["全体"]
+    df["人気帯"] = pd.Categorical(df["人気帯"], categories=tier_cat, ordered=True)
+    return df.set_index(["threshold", "人気帯"])
+
+
 def calibration_curve(
     test_df: pd.DataFrame,
     pred_df: pd.DataFrame,

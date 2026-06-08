@@ -197,6 +197,15 @@ def train_mode(walkforward: bool = True) -> None:
     else:
         print("  データなし")
 
+    print("--- 馬連 Bootstrap 信頼区間（EV閾値 × 人気帯, 95%CI）---")
+    quinella_ci = evaluation.ev_quinella_bootstrap_ci(
+        test_df, pred_df, payoffs_df, random_state=42
+    )
+    if not quinella_ci.empty:
+        print(quinella_ci.to_string())
+    else:
+        print("  データなし")
+
     print("--- キャリブレーションカーブ（単勝・較正後）---")
     print(calib_after["win"].to_string(index=False))
     print("--- キャリブレーションカーブ（複勝・較正後）---")
