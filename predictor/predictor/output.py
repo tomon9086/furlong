@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -18,6 +19,8 @@ from predictor.simulation import (
 _OUTPUT_DIR = Path("output")
 _EV_THRESHOLD = 1.5
 _MC_SEED = 42
+
+logger = logging.getLogger(__name__)
 
 
 def _mark_recommended(
@@ -153,8 +156,8 @@ def print_prediction(pred_df: pd.DataFrame) -> None:
     for race_id, group in df.groupby("race_id"):
         group = group.sort_values("predicted_rank")
         show_cols = [c for c in display_cols if c in group.columns]
-        print(f"\n=== レース {race_id} ===")
-        print(group[show_cols].to_string(index=False))
+        logger.info(f"\n=== レース {race_id} ===")
+        logger.info(group[show_cols].to_string(index=False))
 
         win_horses = group[group["recommended_win"]]
         place_horses = group[group["recommended_place"]]
@@ -166,29 +169,29 @@ def print_prediction(pred_df: pd.DataFrame) -> None:
             "horse_number"
         )
 
-        print("\n  推奨買い目:")
+        logger.info("\n  推奨買い目:")
         if win_horses.empty:
-            print(f"    単勝 : (EV しきい値 {_EV_THRESHOLD} 未達・推奨なし)")
+            logger.info(f"    単勝 : (EV しきい値 {_EV_THRESHOLD} 未達・推奨なし)")
         else:
             if "ev" in win_horses.columns and not win_horses["ev"].isna().all():
                 ev_str = f" (EV={float(win_horses['ev'].iloc[0]):.2f})"
             else:
                 ev_str = ""
-            print(f"    単勝 : {win_horses['horse_number'].tolist()}{ev_str}")
+            logger.info(f"    単勝 : {win_horses['horse_number'].tolist()}{ev_str}")
 
-        print(f"    複勝 : {place_horses['horse_number'].tolist()}")
+        logger.info(f"    複勝 : {place_horses['horse_number'].tolist()}")
 
         if len(quinella_horses) >= 2:
             hn = quinella_horses["horse_number"].tolist()
-            print(f"    馬連  : {hn[0]}-{hn[1]}")
+            logger.info(f"    馬連  : {hn[0]}-{hn[1]}")
 
         if len(wide_horses) >= 2:
             hn = wide_horses["horse_number"].tolist()
-            print(f"    ワイド: {hn[0]}-{hn[1]}")
+            logger.info(f"    ワイド: {hn[0]}-{hn[1]}")
 
         if len(trifecta_horses) >= 3:
             hn = trifecta_horses["horse_number"].tolist()
-            print(f"    三連複: {hn[0]}-{hn[1]}-{hn[2]}")
+            logger.info(f"    三連複: {hn[0]}-{hn[1]}-{hn[2]}")
 
 
 def _make_filename(
@@ -310,7 +313,7 @@ def save_csv(
     )
     path = output_dir / f"{filename}.csv"
     df.sort_values(["race_id", "predicted_rank"]).to_csv(path, index=False)
-    print(f"CSV 保存: {path}")
+    logger.info(f"CSV 保存: {path}")
 
 
 def save_output(
@@ -335,8 +338,8 @@ def save_output(
 
     csv_path = race_dir / "prediction.csv"
     df.sort_values(["race_id", "predicted_rank"]).to_csv(csv_path, index=False)
-    print(f"CSV 保存: {csv_path}")
+    logger.info(f"CSV 保存: {csv_path}")
 
     toml_path = race_dir / "betting.toml"
     toml_path.write_text(_format_betting_toml(df), encoding="utf-8")
-    print(f"TOML 保存: {toml_path}")
+    logger.info(f"TOML 保存: {toml_path}")
