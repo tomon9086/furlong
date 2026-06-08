@@ -576,18 +576,14 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
         axis=1,
     )
     for n in [3, 5]:
-        _sub_pos = _all_shifts_c[
-            [f"finishing_position__s{k}" for k in range(1, n + 1)]
-        ]
+        _sub_pos = _all_shifts_c[[f"finishing_position__s{k}" for k in range(1, n + 1)]]
         df_cond[f"avg_finish_last{n}_cond"] = _sub_pos.mean(axis=1, skipna=True)
         df_cond[f"best_finish_last{n}_cond"] = _sub_pos.min(axis=1, skipna=True)
 
         _sub_l3f = _all_shifts_c[[f"last_3f__s{k}" for k in range(1, n + 1)]]
         df_cond[f"avg_last3f_last{n}_cond"] = _sub_l3f.mean(axis=1, skipna=True)
 
-        _sub_cor = _all_shifts_c[
-            [f"first_corner_pos__s{k}" for k in range(1, n + 1)]
-        ]
+        _sub_cor = _all_shifts_c[[f"first_corner_pos__s{k}" for k in range(1, n + 1)]]
         df_cond[f"avg_corner_last{n}_cond"] = _sub_cor.mean(axis=1, skipna=True)
 
         _sub_rnk = _all_shifts_c[[f"last_3f_rank__s{k}" for k in range(1, n + 1)]]

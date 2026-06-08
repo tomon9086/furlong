@@ -12,7 +12,6 @@ from predictor.preprocessing import (
     walk_forward_splits,
 )
 
-
 # ──────────────────────────────────────────────
 # _parse_finish_time
 # ──────────────────────────────────────────────
@@ -64,38 +63,40 @@ class TestParseFirstCorner:
 
 def _make_raw_df(n: int = 3) -> pd.DataFrame:
     """最小限のレースデータを作成する（preprocess テスト用）。"""
-    return pd.DataFrame({
-        "race_id": [f"R{i}" for i in range(n)],
-        "date": ["2024/01/01"] * n,
-        "venue": ["東京"] * n,
-        "course_type": ["芝"] * n,
-        "distance": ["1600"] * n,
-        "direction": ["右"] * n,
-        "weather": ["晴"] * n,
-        "track_condition": ["良"] * n,
-        "grade": ["G1"] * n,
-        "head_count": [16] * n,
-        "horse_number": [str(i + 1) for i in range(n)],
-        "finishing_position": [str(i + 1) for i in range(n)],
-        "bracket_number": [str(i + 1) for i in range(n)],
-        "horse_id": [f"H{i}" for i in range(n)],
-        "horse_name": [f"Horse{i}" for i in range(n)],
-        "sex_age": ["牡4"] * n,
-        "weight_carried": ["57.0"] * n,
-        "jockey_id": [f"J{i}" for i in range(n)],
-        "jockey_name": [f"Jockey{i}" for i in range(n)],
-        "finish_time": ["1:33.4"] * n,
-        "passing_order": ["04-04-03-02"] * n,
-        "last_3f": ["34.5"] * n,
-        "odds": ["5.2"] * n,
-        "popularity": ["2"] * n,
-        "horse_weight": ["480"] * n,
-        "horse_weight_diff": ["0"] * n,
-        "trainer_id": [f"T{i}" for i in range(n)],
-        "sire": ["Sire"] * n,
-        "dam": ["Dam"] * n,
-        "broodmare_sire": ["BMS"] * n,
-    })
+    return pd.DataFrame(
+        {
+            "race_id": [f"R{i}" for i in range(n)],
+            "date": ["2024/01/01"] * n,
+            "venue": ["東京"] * n,
+            "course_type": ["芝"] * n,
+            "distance": ["1600"] * n,
+            "direction": ["右"] * n,
+            "weather": ["晴"] * n,
+            "track_condition": ["良"] * n,
+            "grade": ["G1"] * n,
+            "head_count": [16] * n,
+            "horse_number": [str(i + 1) for i in range(n)],
+            "finishing_position": [str(i + 1) for i in range(n)],
+            "bracket_number": [str(i + 1) for i in range(n)],
+            "horse_id": [f"H{i}" for i in range(n)],
+            "horse_name": [f"Horse{i}" for i in range(n)],
+            "sex_age": ["牡4"] * n,
+            "weight_carried": ["57.0"] * n,
+            "jockey_id": [f"J{i}" for i in range(n)],
+            "jockey_name": [f"Jockey{i}" for i in range(n)],
+            "finish_time": ["1:33.4"] * n,
+            "passing_order": ["04-04-03-02"] * n,
+            "last_3f": ["34.5"] * n,
+            "odds": ["5.2"] * n,
+            "popularity": ["2"] * n,
+            "horse_weight": ["480"] * n,
+            "horse_weight_diff": ["0"] * n,
+            "trainer_id": [f"T{i}" for i in range(n)],
+            "sire": ["Sire"] * n,
+            "dam": ["Dam"] * n,
+            "broodmare_sire": ["BMS"] * n,
+        }
+    )
 
 
 def _make_multi_race_raw_df() -> pd.DataFrame:
@@ -103,38 +104,40 @@ def _make_multi_race_raw_df() -> pd.DataFrame:
     rows = []
     for race_num in range(5):
         for horse_idx in range(2):
-            rows.append({
-                "race_id": f"R{race_num}",
-                "date": f"2024/01/{race_num + 1:02d}",
-                "venue": "東京",
-                "course_type": "芝",
-                "distance": "1600",
-                "direction": "右",
-                "weather": "晴",
-                "track_condition": "良",
-                "grade": "G1",
-                "head_count": 10,
-                "horse_number": str(horse_idx + 1),
-                "finishing_position": str(horse_idx + 1),
-                "bracket_number": str(horse_idx + 1),
-                "horse_id": f"H{horse_idx}",
-                "horse_name": f"Horse{horse_idx}",
-                "sex_age": "牡4",
-                "weight_carried": "57.0",
-                "jockey_id": f"J{horse_idx}",
-                "jockey_name": f"Jockey{horse_idx}",
-                "finish_time": "1:33.4",
-                "passing_order": "04-04-03-02",
-                "last_3f": "34.5",
-                "odds": "5.2",
-                "popularity": "2",
-                "horse_weight": "480",
-                "horse_weight_diff": "0",
-                "trainer_id": f"T{horse_idx}",
-                "sire": "Sire",
-                "dam": "Dam",
-                "broodmare_sire": "BMS",
-            })
+            rows.append(
+                {
+                    "race_id": f"R{race_num}",
+                    "date": f"2024/01/{race_num + 1:02d}",
+                    "venue": "東京",
+                    "course_type": "芝",
+                    "distance": "1600",
+                    "direction": "右",
+                    "weather": "晴",
+                    "track_condition": "良",
+                    "grade": "G1",
+                    "head_count": 10,
+                    "horse_number": str(horse_idx + 1),
+                    "finishing_position": str(horse_idx + 1),
+                    "bracket_number": str(horse_idx + 1),
+                    "horse_id": f"H{horse_idx}",
+                    "horse_name": f"Horse{horse_idx}",
+                    "sex_age": "牡4",
+                    "weight_carried": "57.0",
+                    "jockey_id": f"J{horse_idx}",
+                    "jockey_name": f"Jockey{horse_idx}",
+                    "finish_time": "1:33.4",
+                    "passing_order": "04-04-03-02",
+                    "last_3f": "34.5",
+                    "odds": "5.2",
+                    "popularity": "2",
+                    "horse_weight": "480",
+                    "horse_weight_diff": "0",
+                    "trainer_id": f"T{horse_idx}",
+                    "sire": "Sire",
+                    "dam": "Dam",
+                    "broodmare_sire": "BMS",
+                }
+            )
     return pd.DataFrame(rows)
 
 
@@ -176,7 +179,10 @@ class TestPreprocess:
     def test_prev_course_type_creates_change_flag(self):
         """prev_course_type が与えられた場合、course_type_change が生成されること。"""
         raw = _make_raw_df(2)
-        raw["prev_course_type"] = ["ダート", "芝"]  # idx0: ダート→芝(変化), idx1: 芝→芝(変化なし)
+        raw["prev_course_type"] = [
+            "ダート",
+            "芝",
+        ]  # idx0: ダート→芝(変化), idx1: 芝→芝(変化なし)
         df = preprocess(raw)
         assert "course_type_change" in df.columns
         assert "prev_course_type" not in df.columns
@@ -217,12 +223,22 @@ class TestComputeRecentStats:
         df = preprocess(_make_multi_race_raw_df())
         result = compute_recent_stats(df)
         expected_cols = [
-            "avg_finish_last3", "best_finish_last3", "avg_last3f_last3",
-            "avg_finish_last5", "best_finish_last5", "avg_last3f_last5",
-            "avg_corner_last3", "avg_corner_last5",
-            "avg_finish_last3_cond", "best_finish_last3_cond", "avg_last3f_last3_cond",
-            "avg_finish_last5_cond", "best_finish_last5_cond", "avg_last3f_last5_cond",
-            "avg_corner_last3_cond", "avg_corner_last5_cond",
+            "avg_finish_last3",
+            "best_finish_last3",
+            "avg_last3f_last3",
+            "avg_finish_last5",
+            "best_finish_last5",
+            "avg_last3f_last5",
+            "avg_corner_last3",
+            "avg_corner_last5",
+            "avg_finish_last3_cond",
+            "best_finish_last3_cond",
+            "avg_last3f_last3_cond",
+            "avg_finish_last5_cond",
+            "best_finish_last5_cond",
+            "avg_last3f_last5_cond",
+            "avg_corner_last3_cond",
+            "avg_corner_last5_cond",
             "bracket_distance_avg_finish",
         ]
         for col in expected_cols:
@@ -262,7 +278,9 @@ class TestComputeRecentStats:
         """2走目のコースが前走と異なる場合、フラグは1であること。"""
         raw = _make_multi_race_raw_df()
         # H0 の R1 を ダート に変更（R0 は芝 → R1 はダート）
-        raw.loc[(raw["horse_id"] == "H0") & (raw["race_id"] == "R1"), "course_type"] = "ダート"
+        raw.loc[(raw["horse_id"] == "H0") & (raw["race_id"] == "R1"), "course_type"] = (
+            "ダート"
+        )
         df = preprocess(raw)
         result = compute_recent_stats(df)
         h0_r1 = result[(result["horse_id"] == "H0") & (result["race_id"] == "R1")]
@@ -279,8 +297,8 @@ class TestSplitByDate:
         dates = pd.date_range("2020-01-01", periods=20, freq="D")
         df = pd.DataFrame({"date": dates, "x": range(20)})
         train, val, test = split_by_date(df, val_ratio=0.1, test_ratio=0.2)
-        assert len(test) == 4   # 20 * 0.2
-        assert len(val) == 2    # 20 * 0.1
+        assert len(test) == 4  # 20 * 0.2
+        assert len(val) == 2  # 20 * 0.1
         assert len(train) == 14  # 残り
 
     def test_no_future_leak(self):

@@ -231,7 +231,9 @@ def train_mode(walkforward: bool = True) -> None:
             for fold_idx, (wf_train, wf_test) in enumerate(wf_splits, start=1)
         ]
         n_workers = min(len(fold_args), os.cpu_count() or 1)
-        logger.info(f"  {len(fold_args)} フォールドを並列実行中 (workers={n_workers})...")
+        logger.info(
+            f"  {len(fold_args)} フォールドを並列実行中 (workers={n_workers})..."
+        )
         with ProcessPoolExecutor(max_workers=n_workers) as executor:
             fold_results = list(executor.map(_run_wf_fold, fold_args))
         fold_results.sort(key=lambda x: x["fold"])
@@ -281,9 +283,7 @@ def predict_mode(race_id: str) -> None:
                 sys.exit(1)
             raw = load_predict_data(DATABASE_URL, race_id)
             if raw.empty:
-                logger.error(
-                    f"レース {race_id} の出走馬データが見つかりません"
-                )
+                logger.error(f"レース {race_id} の出走馬データが見つかりません")
                 sys.exit(1)
         else:
             sys.exit(1)
