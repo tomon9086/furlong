@@ -186,7 +186,7 @@ def train_mode(walkforward: bool = True) -> None:
     else:
         logger.info(mc_ev_analysis.to_string())
 
-    logger.info("払戈データを読み込み中...")
+    logger.info("払戻データを読み込み中...")
     test_race_ids = test_df["race_id"].unique().tolist()
     payoffs_df = load_payoffs(DATABASE_URL, test_race_ids)
     multi_bet = evaluation.multi_bet_recovery_analysis(test_df, pred_df, payoffs_df)
@@ -194,7 +194,7 @@ def train_mode(walkforward: bool = True) -> None:
     if not multi_bet.empty:
         logger.info(multi_bet.to_string())
     else:
-        logger.info("  払戈データなし（payoffs テーブルが空の可能性あり）")
+        logger.info("  払戻データなし（payoffs テーブルが空の可能性あり）")
 
     logger.info("--- EV閘値 × 人気帯 × 券種 グリッド回収率 ---")
     ev_multi = evaluation.ev_multi_bet_grid(test_df, pred_df, payoffs_df)
