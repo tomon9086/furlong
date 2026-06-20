@@ -326,20 +326,25 @@ def save_output(
 ) -> None:
     """予測結果を CSV + 買い目 TOML としてディレクトリ配下に保存する。
 
-    output_dir/<dirname>/prediction.csv
-    output_dir/<dirname>/betting.toml
+    output_dir/<race_dirname>/<predict_timestamp>/prediction.csv
+    output_dir/<race_dirname>/<predict_timestamp>/betting.toml
+
+    predict を複数回実行しても timestamp サブディレクトリで分離されるため上書きされない。
     """
+    from datetime import datetime
+
     df = _mark_recommended(pred_df)
     filename = _make_filename(
         race_id, race_name=race_name, race_number=race_number, date=date
     )
-    race_dir = output_dir / filename
-    race_dir.mkdir(parents=True, exist_ok=True)
+    predict_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = output_dir / filename / predict_ts
+    run_dir.mkdir(parents=True, exist_ok=True)
 
-    csv_path = race_dir / "prediction.csv"
+    csv_path = run_dir / "prediction.csv"
     df.sort_values(["race_id", "predicted_rank"]).to_csv(csv_path, index=False)
     logger.info(f"CSV 保存: {csv_path}")
 
-    toml_path = race_dir / "betting.toml"
+    toml_path = run_dir / "betting.toml"
     toml_path.write_text(_format_betting_toml(df), encoding="utf-8")
     logger.info(f"TOML 保存: {toml_path}")
