@@ -267,28 +267,23 @@ def predict_mode(race_id: str) -> None:
     )
 
     logger.info(f"レース {race_id} の予測を開始...")
-    raw = load_predict_data(DATABASE_URL, race_id)
-    if raw.empty:
-        logger.warning(f"レース {race_id} の出走馬データが見つかりません")
-        answer = input("出馬表を取得しますか？ Y/n: ").strip().lower()
-        if answer in ("", "y"):
-            import subprocess
-
-            result = subprocess.run(
-                [sys.executable, "-m", "scraper.main", "shutuba", race_id],
-                cwd=None,
-            )
-            if result.returncode != 0:
-                logger.error("出馬表の取得に失敗しました")
-                sys.exit(1)
-            raw = load_predict_data(DATABASE_URL, race_id)
-            if raw.empty:
-                logger.error(f"レース {race_id} の出走馬データが見つかりません")
-                sys.exit(1)
-        else:
-            sys.exit(1)
 
     import subprocess
+
+    logger.info(f"レース {race_id} の最新出馬表を取得中...")
+    result = subprocess.run(
+        [sys.executable, "-m", "scraper.main", "shutuba", race_id],
+        cwd=None,
+    )
+    if result.returncode != 0:
+        logger.warning(
+            f"警告: レース {race_id} の出馬表取得に失敗しました。DB の既存データで続行します。"
+        )
+
+    raw = load_predict_data(DATABASE_URL, race_id)
+    if raw.empty:
+        logger.error(f"レース {race_id} の出走馬データが見つかりません")
+        sys.exit(1)
 
     logger.info(f"レース {race_id} の最新オッズを取得中...")
     result = subprocess.run(
