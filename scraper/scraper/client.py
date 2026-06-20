@@ -78,7 +78,7 @@ class NetkeibaClient:
     def get_shutuba(self, race_id: str) -> str:
         """出馬表ページを取得してHTMLを返す."""
         url = f"{_RACE_BASE_URL}/race/shutuba.html?race_id={race_id}"
-        return self._get(url)
+        return self._get(url, encoding="utf-8")
 
     def get_odds(self, race_id: str) -> str:
         """単勝オッズの JSON API レスポンスを取得して文字列として返す.
@@ -110,7 +110,7 @@ class NetkeibaClient:
             kaisai_date: 開催日 (YYYYMMDD 形式)
         """
         url = f"{_RACE_BASE_URL}/top/race_list.html?kaisai_date={kaisai_date}"
-        return self._get(url)
+        return self._get(url, encoding="utf-8")
 
     def _get(
         self,
