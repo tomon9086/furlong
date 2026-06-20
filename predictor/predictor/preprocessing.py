@@ -25,6 +25,7 @@ _SELECT_COLS = """
     r.track_condition,
     r.grade,
     r.head_count,
+    r.race_condition,
     rr.horse_number,
     rr.finishing_position,
     rr.bracket_number,
@@ -480,6 +481,13 @@ def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFra
         )
         df.loc[missing_grade, "grade"] = extracted
 
+    # ハンデ戦フラグ
+    if "race_condition" in df.columns:
+        df["is_handicap"] = (
+            df["race_condition"].str.contains("ハンデ", na=False).astype(float)
+        )
+        df = df.drop(columns=["race_condition"])
+
     # カテゴリ変数
     cat_cols = [
         "venue",
@@ -689,6 +697,7 @@ def get_feature_columns() -> list[str]:
         "track_condition",
         "grade",
         "head_count",
+        "is_handicap",
         # 出走馬情報
         "horse_number",
         "bracket_number",

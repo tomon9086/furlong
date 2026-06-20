@@ -161,7 +161,7 @@ class ShutsubaParser(BaseParser):
                     info["馬場状態"] = m.group(1)
                     break
 
-        # RaceData02: 日付 / 開催場 / レース番号 / グレード
+        # RaceData02: 日付 / 開催場 / レース番号 / グレード / レース条件
         data02 = soup.find("div", class_="RaceData02")
         if data02:
             text02 = data02.get_text(strip=True)
@@ -188,6 +188,21 @@ class ShutsubaParser(BaseParser):
                 grade_span = li.find("span", class_=re.compile(r"Grade|Icon_Grade"))
                 if grade_span:
                     info["グレード"] = grade_span.get_text(strip=True)
+                    break
+
+            # レース条件: 日付・開催回次・R番号・発走時刻・グレード以外の li テキスト
+            for li in data02.find_all("li"):
+                if li.find("img") or li.find("span"):
+                    continue
+                li_text = li.get_text(strip=True)
+                if (
+                    not re.search(r"^\d+回", li_text)
+                    and not re.search(r"^\d{4}年", li_text)
+                    and not re.search(r"^\d+R$", li_text)
+                    and not re.search(r"^発走", li_text)
+                    and re.search(r"歳|勝|オープン|マイル|ハンデ|別定|定量|馬齢|新馬|未勝利|牝|牡|障害", li_text)
+                ):
+                    info["レース条件"] = li_text
                     break
 
         # title タグからのフォールバック（RaceData02 で取れなかった場合）

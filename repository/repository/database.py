@@ -71,12 +71,12 @@ class Database:
                         race_id, race_name, race_number, date, venue,
                         course_type, distance, direction, weather,
                         track_condition, grade, start_time, head_count,
-                        raw_data, created_at, updated_at
+                        race_condition, raw_data, created_at, updated_at
                     ) VALUES (
                         %s, %s, %s, %s, %s,
                         %s, %s, %s, %s,
                         %s, %s, %s, %s,
-                        %s, %s, %s
+                        %s, %s, %s, %s
                     )
                     ON CONFLICT (race_id) DO UPDATE SET
                         race_name = EXCLUDED.race_name,
@@ -91,6 +91,7 @@ class Database:
                         grade = EXCLUDED.grade,
                         start_time = EXCLUDED.start_time,
                         head_count = EXCLUDED.head_count,
+                        race_condition = EXCLUDED.race_condition,
                         raw_data = EXCLUDED.raw_data,
                         updated_at = EXCLUDED.updated_at
                     """,
@@ -108,6 +109,7 @@ class Database:
                         _or_none(race_info.get("グレード")),
                         _or_none(race_info.get("発走時刻")),
                         len(results) if results else None,
+                        _or_none(race_info.get("レース条件")),
                         json.dumps(dict(race_info), ensure_ascii=False),
                         now,
                         now,

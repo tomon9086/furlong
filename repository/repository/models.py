@@ -17,6 +17,7 @@ class RaceInfo(TypedDict, total=False):
     天候: str
     馬場状態: str
     発走時刻: str
+    レース条件: str
 
 
 class RaceDetailRow(TypedDict, total=False):

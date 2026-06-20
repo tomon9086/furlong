@@ -132,10 +132,11 @@ class RaceDetailParser(BaseParser):
                 )
                 info.update(self._parse_condition_text(condition_text))  # type: ignore[arg-type]
 
-        # 日付・開催場
+        # 日付・開催場・レース条件
         diary_tag = soup.find("p", class_="smalltxt")
         if diary_tag:
             diary_text = diary_tag.get_text(strip=True)
+            info["レース条件"] = diary_text
             m = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", diary_text)
             if m:
                 info["日付"] = f"{m.group(1)}/{m.group(2).zfill(2)}/{m.group(3).zfill(2)}"
