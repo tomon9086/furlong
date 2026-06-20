@@ -41,6 +41,9 @@ htmlcov/
 .idea/
 .vscode/
 
+# Claude Code
+.claude/settings.local.json
+
 # Docker
 postgres_data/
 
