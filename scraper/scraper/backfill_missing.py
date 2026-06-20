@@ -6,6 +6,9 @@
     # 馬のみ補完する場合
     uv run --package furlong-scraper python -m scraper.backfill_missing --horses-only
 
+    # 指定した race_id の出馬表を強制再取得（既存データを上書き）
+    uv run --package furlong-scraper python -m scraper.backfill_missing --force 202605030511 202605030512
+
 環境変数:
     DATABASE_URL  PostgreSQL 接続文字列（例: postgresql://user:pass@localhost:5432/furlong）
 """
@@ -20,7 +23,7 @@ from dotenv import load_dotenv
 
 from repository import Database
 from .client import NetkeibaClient
-from .parsers import HorseParser, JockeyParser, RaceDetailParser, TrainerParser
+from .parsers import HorseParser, JockeyParser, RaceDetailParser, ShutsubaParser, TrainerParser
 
 load_dotenv()
 
@@ -193,6 +196,34 @@ def backfill_trainers(
     return ok, fail
 
 
+def backfill_force_shutuba(
+    race_ids: list[str],
+    db: Database,
+    client: NetkeibaClient,
+) -> tuple[int, int]:
+    """指定した race_id の出馬表を強制再取得して DB を上書きする。(成功数, 失敗数) を返す。"""
+    if not race_ids:
+        return 0, 0
+
+    logger.info("出馬表を強制再取得: %d 件", len(race_ids))
+    parser = ShutsubaParser()
+    ok = fail = 0
+    for i, race_id in enumerate(race_ids, start=1):
+        logger.info("[%d/%d] 出馬表 %s を再取得中...", i, len(race_ids), race_id)
+        try:
+            html = client.get_shutuba(race_id)
+            race_info = parser.parse_race_info(html)
+            rows = parser.parse(html)
+            db.save_race(race_id, race_info, rows)
+            ok += 1
+        except Exception:
+            logger.exception(
+                "出馬表 %s の再取得に失敗しました。スキップします。", race_id
+            )
+            fail += 1
+    return ok, fail
+
+
 # --------------------------------------------------------------------------- #
 # エントリーポイント
 # --------------------------------------------------------------------------- #
@@ -207,6 +238,12 @@ def main() -> None:
         action="store_true",
         help="馬のみ補完する（騎手・調教師・レース結果をスキップ）",
     )
+    parser.add_argument(
+        "--force",
+        nargs="+",
+        metavar="RACE_ID",
+        help="指定した race_id の出馬表を強制再取得して DB を上書きする",
+    )
     args = parser.parse_args()
 
     try:
@@ -214,6 +251,16 @@ def main() -> None:
     except KeyError:
         print("環境変数 DATABASE_URL が設定されていません。", file=sys.stderr)
         sys.exit(1)
+
+    # --force モード: 指定 race_id を再取得して終了
+    if args.force:
+        db = Database(database_url)
+        with NetkeibaClient() as client:
+            ok, fail = backfill_force_shutuba(args.force, db, client)
+        print()
+        print("=== 強制再取得 完了 ===")
+        print(f"出馬表: 成功 {ok} 件 / 失敗 {fail} 件")
+        return
 
     with psycopg.connect(database_url) as conn:
         race_ids = (
