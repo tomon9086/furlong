@@ -230,4 +230,7 @@ def predict(models: Models | CalibratedModels, df: pd.DataFrame) -> pd.DataFrame
     elif "odds" in df.columns:
         result["odds"] = pd.to_numeric(df["odds"].values, errors="coerce")
 
+    if "weight_carried" in df.columns:
+        result["weight_carried"] = pd.to_numeric(df["weight_carried"].values, errors="coerce")
+
     return result
