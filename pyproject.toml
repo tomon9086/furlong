@@ -4,4 +4,5 @@ members = ["scraper", "predictor", "repository"]
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "nbstripout>=0.7",
 ]
