@@ -49,6 +49,9 @@ uv sync
 
 # dev 依存も含める場合（全パッケージの extras を含む）
 uv sync --all-extras
+
+# 4. ノートブック commit 時に自動で出力を剥がす git filter を登録（clone ごとに1回）
+uv run nbstripout --install
 ```
 
 本プロジェクトは uv ワークスペース構成（`pyproject.toml` 参照）。
@@ -84,6 +87,20 @@ uv run --package furlong-predictor python -m predictor.main train
 # predictor: 指定レースの予測
 uv run --package furlong-predictor python -m predictor.main predict <race_id>
 ```
+
+## データ分析（Jupyter）
+
+DB データの探索的分析・可視化は `analysis/` パッケージに集約している。詳細は
+[analysis/README.md](../analysis/README.md) を参照。
+
+```bash
+# Jupyter Lab 起動
+uv run --package furlong-analysis jupyter lab --notebook-dir=analysis
+```
+
+ノートブック本体（`.ipynb`）はそのまま Git 管理する。commit 時に
+[nbstripout](https://github.com/kynan/nbstripout) の git filter が実行結果を自動で剥がすため、
+差分にノイズが乗らない（`.gitattributes` 参照。未セットアップの場合は `uv run nbstripout --install`）。
 
 ## バックアップ
 
