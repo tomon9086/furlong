@@ -22,12 +22,12 @@ logger = logging.getLogger(__name__)
 
 def _run_wf_fold(args: tuple) -> dict:
     """Walk-forward の1フォールドを実行するヘルパー（ProcessPoolExecutor 並列実行用）。"""
-    fold_idx, wf_train, wf_test = args
+    fold_idx, wf_train, wf_test, half_life_days = args
     from predictor import calibration as _calib_mod
     from predictor import evaluation
     from predictor import model as _model
 
-    wf_models = _model.train(wf_train)
+    wf_models = _model.train(wf_train, half_life_days=half_life_days)
     wf_calibrated = _calib_mod.calibrate_models(wf_models, wf_test)
     wf_pred = _model.predict(wf_calibrated, wf_test)
     wf_metrics = evaluation.evaluate(wf_test, wf_pred)
@@ -41,8 +41,18 @@ def _run_wf_fold(args: tuple) -> dict:
     }
 
 
-def train_mode(walkforward: bool = True) -> None:
-    """学習モード: 全データを使ってモデルを学習し保存する。"""
+def train_mode(
+    walkforward: bool = True, half_life_days: float | None = None
+) -> None:
+    """学習モード: 全データを使ってモデルを学習し保存する。
+
+    Parameters
+    ----------
+    half_life_days : float | None
+        指定した場合、レース日付からの経過日数に応じた指数減衰サンプルウェイト
+        （半減期＝指定日数）を適用して学習する。``None``（デフォルト）の場合は
+        従来どおり重みなしで学習する。
+    """
     from predictor.preprocessing import (
         compute_recent_stats,
         load_data,
@@ -70,8 +80,13 @@ def train_mode(walkforward: bool = True) -> None:
 
     from predictor import evaluation, model
 
-    logger.info("モデルを学習中...")
-    models = model.train(train_df)
+    if half_life_days is not None:
+        logger.info(
+            f"モデルを学習中...（時間減衰ウェイト: half_life_days={half_life_days:.0f}）"
+        )
+    else:
+        logger.info("モデルを学習中...")
+    models = model.train(train_df, half_life_days=half_life_days)
 
     logger.info("評価中（較正前）...")
     pred_df_raw = model.predict(models, test_df)
@@ -227,7 +242,7 @@ def train_mode(walkforward: bool = True) -> None:
 
         wf_splits = walk_forward_splits(df, n_splits=5)
         fold_args = [
-            (fold_idx, wf_train, wf_test)
+            (fold_idx, wf_train, wf_test, half_life_days)
             for fold_idx, (wf_train, wf_test) in enumerate(wf_splits, start=1)
         ]
         n_workers = min(len(fold_args), os.cpu_count() or 1)
@@ -337,10 +352,77 @@ def predict_mode(race_id: str) -> None:
     )
 
 
+def tune_mode(n_trials: int = 30) -> None:
+    """Optuna で LightGBM パラメータと half_life_days を最適化する。"""
+    from predictor import tuning
+    from predictor.preprocessing import compute_recent_stats, load_data, preprocess
+
+    logger.info("データを読み込み中...")
+    raw = load_data(DATABASE_URL)
+    df = preprocess(raw)
+
+    logger.info("近走成績フィーチャーを計算中...")
+    df = compute_recent_stats(df)
+
+    logger.info(f"Optuna チューニングを実行中...（n_trials={n_trials}）")
+    study = tuning.run_tuning(df, n_trials=n_trials)
+
+    logger.info("--- 最良パラメータ ---")
+    for k, v in study.best_params.items():
+        logger.info(f"  {k}: {v}")
+    logger.info(f"最良スコア（walk-forward平均回収率）: {study.best_value:.4f}")
+
+
+def compare_half_life_mode() -> None:
+    """half_life_days の比較実験を実行し、結果を CSV に保存する。"""
+    from predictor import half_life_experiment
+    from predictor.preprocessing import (
+        compute_recent_stats,
+        load_data,
+        preprocess,
+        split_by_date,
+    )
+
+    logger.info("データを読み込み中...")
+    raw = load_data(DATABASE_URL)
+    df = preprocess(raw)
+
+    logger.info("近走成績フィーチャーを計算中...")
+    df = compute_recent_stats(df)
+
+    logger.info("時系列分割中...")
+    train_df, val_df, test_df = split_by_date(df)
+
+    logger.info("half_life_days 比較実験を実行中...")
+    result = half_life_experiment.run_comparison(train_df, val_df, test_df)
+
+    logger.info("--- half_life_days 比較結果 ---")
+    logger.info(result.to_string())
+
+    path = half_life_experiment.save_comparison(result)
+    logger.info(f"結果を保存しました: {path}")
+
+
+def _parse_half_life_days(argv: list[str]) -> float | None:
+    """``--half-life-days N`` を argv から取り出す（未指定なら None）。"""
+    if "--half-life-days" not in argv:
+        return None
+    idx = argv.index("--half-life-days")
+    try:
+        return float(argv[idx + 1])
+    except (IndexError, ValueError):
+        logger.error(
+            "--half-life-days には数値を指定してください（例: --half-life-days 1095）"
+        )
+        sys.exit(1)
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         logger.error(
-            "使い方: python -m predictor.main train [--no-walkforward] | predict <race_id>"
+            "使い方: python -m predictor.main "
+            "train [--no-walkforward] [--half-life-days N] "
+            "| predict <race_id> | tune [--n-trials N] | compare-half-life"
         )
         sys.exit(1)
 
@@ -348,12 +430,21 @@ def main() -> None:
 
     if command == "train":
         walkforward = "--no-walkforward" not in sys.argv
-        train_mode(walkforward=walkforward)
+        half_life_days = _parse_half_life_days(sys.argv)
+        train_mode(walkforward=walkforward, half_life_days=half_life_days)
     elif command == "predict":
         if len(sys.argv) < 3:
             logger.error("使い方: python -m predictor.main predict <race_id>")
             sys.exit(1)
         predict_mode(sys.argv[2])
+    elif command == "tune":
+        n_trials = 30
+        if "--n-trials" in sys.argv:
+            idx = sys.argv.index("--n-trials")
+            n_trials = int(sys.argv[idx + 1])
+        tune_mode(n_trials=n_trials)
+    elif command == "compare-half-life":
+        compare_half_life_mode()
     else:
         logger.error(f"不明なコマンド: {command}")
         sys.exit(1)

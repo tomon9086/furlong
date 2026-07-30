@@ -11,6 +11,7 @@ dependencies = [
     "furlong-repository",
     "fastapi>=0.111",
     "uvicorn[standard]>=0.29",
+    "optuna>=3.6",
 ]
 
 [tool.uv.sources]
