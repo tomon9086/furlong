@@ -690,3 +690,31 @@ Optuna探索で最良だった組み合わせ（`half_life_days=1095`, `num_leav
 ### 時間減衰重み付けタスクの最終結論
 
 3段階の検証（単独split比較 → Optuna同時探索 → 標準splitでのbootstrap CI再検証）を通じて、**時間減衰サンプルウェイトが回収率・Log Lossを改善するという信頼できる証拠は得られなかった**。実装（`compute_time_decay_weight`, `model.train(half_life_days=...)`, CLIフラグ, `tuning.py`）は非破壊的に追加済みで `half_life_days=None`（デフォルト）なら既存挙動と完全互換のため、今後さらに大きな探索予算（n_trials=50〜100等）で再検証する余地は残すが、**現時点ではデフォルト（重みなし）を維持することを推奨**する。
+
+---
+
+## Embeddingハイブリッド 実データ検証（2026-07-30）
+
+> 実装: [plan/time-decay-embedding.md](./plan/time-decay-embedding.md) タスク2
+
+`python -m predictor.main train-embeddings` で騎手ID・調教師ID・父馬名・母父馬名の Entity Embedding を PyTorch で学習（`split_by_date` の train 部分のみ、val/test へのリーク防止）。カーディナリティは train 部分基準で jockey_id=252, trainer_id=283, sire=462, broodmare_sire=867、embedding次元は経験則 `min(50, cardinality**0.25*4)` で 16〜22 次元。5 epoch で補助タスク（`is_placed` 予測）の BCE loss は 0.6496 → 0.5588 まで低下（学習自体は機能している）。
+
+コサイン類似度確認（`similar-embeddings` コマンド）: `sire=Bernardini` に最も近いのは `Curlin`（cos=0.526、同時代の米国産GI級種牡馬で妥当な近さ）など、埋め込み空間が無意味なノイズになっていないことを確認。
+
+標準 train/val/test split（baselineと同一）でLightGBMに統合し比較：
+
+| 設定 | 追加列数 | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|---|
+| baseline（Embeddingなし） | 0 | 20.37% | 73.06% | 0.2406 | 0.4815 |
+| Embedding生ベクトル（73次元） | 73 | 19.88%（悪化） | 71.96%（悪化） | 0.2408（悪化） | 0.4819（悪化） |
+| Embedding + PCA（4カテゴリ×6次元=24列） | 24 | 20.20%（僅かに悪化） | **74.45%（+1.4pt）** | 0.2409（僅かに悪化） | 0.4817（僅かに悪化） |
+
+### 所感
+
+- **生の73次元Embeddingはすべての指標で悪化。** 次元数がLightGBMにとってノイズになった可能性が高く、PCA圧縮の必要性を裏付ける結果。
+- **PCA圧縮（24次元）は回収率のみ改善、Log Lossは横ばい〜微悪化**という分かれた結果。回収率はこのプロジェクトで繰り返し確認済みの通り分散が大きい指標であり（[prediction-accuracy-followup.md](./plan/prediction-accuracy-followup.md)）、+1.4pt が単一splitのノイズか実際の改善かは bootstrap CI なしでは判断できない。より安定した指標である Log Loss が改善していない点は慎重に見るべき材料。
+- 時間減衰ウェイト（タスク1）と同様、**単一splitでの検証だけでは効果を断定できない**という同じ構造の結論になった。
+
+### 現時点の結論
+
+Embeddingハイブリッドの効果は**未確定**。実装（`embedding.py`, `embedding_features.py`, CLI統合）は非破壊的に追加済みで `--use-embeddings` を指定しない限り既存挙動と完全互換のため、デフォルトでは無効のまま維持する。本格的な採用判断には、時間減衰の検証で行ったのと同様に walk-forward + bootstrap CI での再検証、または Optuna への `embedding_pca_dim` 追加探索が必要。

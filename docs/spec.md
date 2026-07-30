@@ -271,6 +271,18 @@ furlong/
 - Optuna 連携（`predictor/predictor/tuning.py`）: `python -m predictor.main tune [--n-trials N]` で `num_leaves`, `learning_rate`, `min_child_samples`, `feature_fraction`, `half_life_days` を walk-forward 平均回収率を目的関数として探索する。
 - **検証結果（2026-07-30、詳細は [experiments.md](./experiments.md) 参照）**: (1) 単一 split で `half_life_days` のみ比較 → 重みなしが win_accuracy・Log Loss で最良。(2) Optuna 同時探索（n_trials=10）→ walk-forward平均回収率では `half_life_days=1095` を含む組み合わせが最良（84.08%）。(3) しかしその最良パラメータを標準の train/val/test split で再学習し bootstrap CI で検証したところ、**win_accuracy・Log Loss・回収率のすべてで重みなしのデフォルトパラメータより悪化**（汎化しなかった）。3段階の検証を通じて**時間減衰サンプルウェイトが改善するという信頼できる証拠は得られておらず、現時点ではデフォルト（`half_life_days=None`、重みなし）の維持を推奨する**。
 
+#### Embeddingハイブリッド（オプション機能）
+
+騎手ID・調教師ID・父馬名・母父馬名を対象に、PyTorch の `nn.Embedding` で低次元ベクトルを事前学習し、LightGBM の特徴量に追加できる。`model.train(..., embedding_feature_columns=...)` で既存特徴量に追加する形（非破壊的）で統合し、`train_mode(use_embeddings=False)`（デフォルト）の場合は従来と完全互換。
+
+- **学習**: `python -m predictor.main train-embeddings` で `split_by_date` の train 部分のみを使い Embedding を学習・保存する（val/test への情報リークを防ぐため）。保存先は `predictor/embeddings/{timestamp}/embeddings.pkl`（`predictor/models/` と同じバージョニング方式）。
+- **次元数**: カーディナリティに応じた経験則 `min(50, cardinality**0.25 * 4)` で自動決定。
+- **未知IDフォールバック**: 学習データに存在しない ID・欠損値はカテゴリごとの平均ベクトル（`"__mean__"`）にフォールバックする。
+- **LightGBM統合**: `python -m predictor.main train --use-embeddings [--embedding-pca-dim N]` で有効化。`--embedding-pca-dim` を指定すると各カテゴリの Embedding テーブルを PCA でその次元数に圧縮してから使用する。
+- **類似度確認**: `python -m predictor.main similar-embeddings <category> <id> [--top-n N]` でコサイン類似度上位を表示できる。
+- **重要な実装上の注意（torch と lightgbm のプロセス分離）**: この環境では torch と lightgbm を同一プロセスで読み込むと OpenMP ランタイムの競合により `lgb.Dataset.construct()` がセグメンテーション違反を起こすことを確認済み。そのため定数を torch 非依存の `embedding_common.py` に切り出し、LightGBM の学習・推論パス（`model.py`, `embedding_features.py`）が `embedding.py`（torch 依存）を import しない設計にしている。`predict()` / `calibration._extract_features()` は `get_feature_columns()` を再計算せず学習済み Booster 自身の `feature_name()` を使うことで、Embedding 特徴量の有無に関わらず学習時と厳密に同じカラム集合を参照する。
+- **検証結果（2026-07-30、詳細は [experiments.md](./experiments.md) 参照）**: 標準 train/val/test split で比較したところ、生の Embedding（73次元）は全指標で悪化。PCA圧縮（4カテゴリ×6次元=24列）は回収率が 73.06%→74.45%（+1.4pt）と改善したが、より安定した指標である Log Loss は横ばい〜微悪化。**単一splitでは効果を断定できず、現時点では未確定**。デフォルトでは `use_embeddings=False` のため既存挙動に影響なし。
+
 #### 出力
 
 標準出力（テキスト形式）および CSV ファイル（`output/prediction_{race_id}.csv`）。

@@ -13,19 +13,6 @@
 - [ ] Walk-forward での馬連戦略安定性確認: walk-forward の各フォールドで「EV≥1.5 × 7番人気以下 × 馬連」回収率を測定し、全フォールドで安定しているか確認する
 - [x] Optuna によるハイパーパラメータ最適化: `num_leaves`, `learning_rate`, `min_child_samples`, `feature_fraction`, `half_life_days` を探索。評価指標は walk-forward 平均回収率 → n_trials=10 で実施。最良パラメータは walk-forward では baseline を上回ったが、標準split + bootstrap CI では逆に悪化し汎化しなかった（[experiments.md](./experiments.md) 参照）。n_trials を増やした再探索は今後の課題
 
-## 時間減衰重み付け + Embeddingハイブリッド
-
-> 計画: [plan/time-decay-embedding.md](./plan/time-decay-embedding.md)
-
-- [x] タスク1: `compute_time_decay_weight` を `preprocessing.py` に実装
-- [x] タスク1: `model.train` / `_build_dataset` / `_build_rank_dataset` に `weight` を統合
-- [x] タスク1: `tuning.py` に Optuna 連携を追加（既存パラメータ + `half_life_days`）
-- [x] タスク1: CLI に重み付け ON/OFF フラグを追加
-- [x] タスク1: `half_life_days` 比較スクリプトで実データ検証し結果をまとめる → 単一splitでは重みなしが最良。[experiments.md](./experiments.md) 参照。Walk-forward + bootstrap CI での再検証が未了
-- [ ] タスク2: 対象カテゴリ変数の Embedding 学習スクリプト（PyTorch）を実装
-- [ ] タスク2: 学習済み Embedding を LightGBM 特徴量に統合するコードを実装
-- [ ] タスク2: Embedding 追加前後の比較検証
-
 ## モンテカルロ着順シミュレーション
 
 > 計画: [plan/ensemble-montecarlo.md](./plan/ensemble-montecarlo.md)
