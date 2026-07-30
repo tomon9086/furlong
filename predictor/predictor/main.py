@@ -42,7 +42,10 @@ def _run_wf_fold(args: tuple) -> dict:
 
 
 def train_mode(
-    walkforward: bool = True, half_life_days: float | None = None
+    walkforward: bool = True,
+    half_life_days: float | None = None,
+    use_embeddings: bool = False,
+    embedding_pca_dim: int | None = None,
 ) -> None:
     """学習モード: 全データを使ってモデルを学習し保存する。
 
@@ -52,6 +55,13 @@ def train_mode(
         指定した場合、レース日付からの経過日数に応じた指数減衰サンプルウェイト
         （半減期＝指定日数）を適用して学習する。``None``（デフォルト）の場合は
         従来どおり重みなしで学習する。
+    use_embeddings : bool
+        True の場合、学習済み Embedding（``python -m predictor.main
+        train-embeddings`` で事前学習・保存したもの）を特徴量に追加する。
+        Embedding は Walk-forward 検証には適用しない（学習期間の重なりによる
+        情報リークを避けるため）。
+    embedding_pca_dim : int | None
+        指定した場合、Embedding を PCA でこの次元数に圧縮してから使用する。
     """
     from predictor.preprocessing import (
         compute_recent_stats,
@@ -80,13 +90,32 @@ def train_mode(
 
     from predictor import evaluation, model
 
+    embedding_cols: list[str] | None = None
+    if use_embeddings:
+        from predictor import embedding_features
+
+        logger.info("学習済み Embedding を読み込み中...")
+        embeddings = embedding_features.load_embeddings()
+        if embedding_pca_dim is not None:
+            embeddings = embedding_features.apply_pca(embeddings, embedding_pca_dim)
+        train_df, embedding_cols = embedding_features.add_embedding_features(
+            train_df, embeddings
+        )
+        val_df, _ = embedding_features.add_embedding_features(val_df, embeddings)
+        test_df, _ = embedding_features.add_embedding_features(test_df, embeddings)
+        logger.info(f"  追加した Embedding 特徴量: {len(embedding_cols)} 列")
+
     if half_life_days is not None:
         logger.info(
             f"モデルを学習中...（時間減衰ウェイト: half_life_days={half_life_days:.0f}）"
         )
     else:
         logger.info("モデルを学習中...")
-    models = model.train(train_df, half_life_days=half_life_days)
+    models = model.train(
+        train_df,
+        half_life_days=half_life_days,
+        embedding_feature_columns=embedding_cols,
+    )
 
     logger.info("評価中（較正前）...")
     pred_df_raw = model.predict(models, test_df)
@@ -403,6 +432,65 @@ def compare_half_life_mode() -> None:
     logger.info(f"結果を保存しました: {path}")
 
 
+def train_embeddings_mode() -> None:
+    """騎手ID・調教師ID・血統IDの Embedding を PyTorch で学習し保存する。
+
+    val/test への情報リークを避けるため、時系列分割の train 部分のみで学習する。
+    """
+    from predictor import embedding
+    from predictor.preprocessing import load_data, preprocess, split_by_date
+
+    logger.info("データを読み込み中...")
+    raw = load_data(DATABASE_URL)
+    df = preprocess(raw)
+
+    logger.info("時系列分割中（Embedding は train 部分のみで学習しリークを防ぐ）...")
+    train_df, _val_df, _test_df = split_by_date(df)
+    logger.info(f"  Embedding 学習データ: {len(train_df):,} 行")
+
+    logger.info("Embedding を学習中...")
+    embeddings = embedding.train_embeddings(train_df)
+
+    version_dir = embedding.save_embeddings(embeddings)
+    logger.info(f"完了 ({version_dir.name})")
+
+
+def similar_embeddings_mode(category: str, id_value: str, top_n: int = 10) -> None:
+    """学習済み Embedding から、指定 ID にコサイン類似度が近い上位 N 件を表示する。"""
+    from predictor import embedding_features
+
+    logger.info(f"学習済み Embedding を読み込み中...（category={category}）")
+    embeddings = embedding_features.load_embeddings()
+    if category not in embeddings:
+        logger.error(f"不明なカテゴリ: {category}（選択肢: {list(embeddings.keys())}）")
+        sys.exit(1)
+
+    table = embeddings[category]
+    if id_value not in table:
+        logger.error(f"ID が見つかりません: {id_value}")
+        sys.exit(1)
+
+    import numpy as np
+
+    target = table[id_value]
+    target_norm = target / np.linalg.norm(target)
+
+    similarities = []
+    for other_id, vec in table.items():
+        if other_id in (id_value, "__mean__"):
+            continue
+        vec_norm = vec / np.linalg.norm(vec)
+        similarities.append((other_id, float(np.dot(target_norm, vec_norm))))
+
+    similarities.sort(key=lambda x: x[1], reverse=True)
+
+    logger.info(
+        f"--- {id_value} にコサイン類似度が近い上位 {top_n} 件（category={category}）---"
+    )
+    for other_id, sim in similarities[:top_n]:
+        logger.info(f"  {other_id}: {sim:.4f}")
+
+
 def _parse_half_life_days(argv: list[str]) -> float | None:
     """``--half-life-days N`` を argv から取り出す（未指定なら None）。"""
     if "--half-life-days" not in argv:
@@ -422,7 +510,9 @@ def main() -> None:
         logger.error(
             "使い方: python -m predictor.main "
             "train [--no-walkforward] [--half-life-days N] "
-            "| predict <race_id> | tune [--n-trials N] | compare-half-life"
+            "[--use-embeddings] [--embedding-pca-dim N] "
+            "| predict <race_id> | tune [--n-trials N] | compare-half-life "
+            "| train-embeddings | similar-embeddings <category> <id> [--top-n N]"
         )
         sys.exit(1)
 
@@ -431,7 +521,17 @@ def main() -> None:
     if command == "train":
         walkforward = "--no-walkforward" not in sys.argv
         half_life_days = _parse_half_life_days(sys.argv)
-        train_mode(walkforward=walkforward, half_life_days=half_life_days)
+        use_embeddings = "--use-embeddings" in sys.argv
+        embedding_pca_dim = None
+        if "--embedding-pca-dim" in sys.argv:
+            idx = sys.argv.index("--embedding-pca-dim")
+            embedding_pca_dim = int(sys.argv[idx + 1])
+        train_mode(
+            walkforward=walkforward,
+            half_life_days=half_life_days,
+            use_embeddings=use_embeddings,
+            embedding_pca_dim=embedding_pca_dim,
+        )
     elif command == "predict":
         if len(sys.argv) < 3:
             logger.error("使い方: python -m predictor.main predict <race_id>")
@@ -445,6 +545,20 @@ def main() -> None:
         tune_mode(n_trials=n_trials)
     elif command == "compare-half-life":
         compare_half_life_mode()
+    elif command == "train-embeddings":
+        train_embeddings_mode()
+    elif command == "similar-embeddings":
+        if len(sys.argv) < 4:
+            logger.error(
+                "使い方: python -m predictor.main "
+                "similar-embeddings <category> <id> [--top-n N]"
+            )
+            sys.exit(1)
+        top_n = 10
+        if "--top-n" in sys.argv:
+            idx = sys.argv.index("--top-n")
+            top_n = int(sys.argv[idx + 1])
+        similar_embeddings_mode(sys.argv[2], sys.argv[3], top_n=top_n)
     else:
         logger.error(f"不明なコマンド: {command}")
         sys.exit(1)
