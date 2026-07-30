@@ -21,6 +21,7 @@
 | [plan/production-deploy.md](./plan/production-deploy.md) | 本番デプロイ構成（docker-compose.prod.yml） |
 | [plan/db-backup.md](./plan/db-backup.md) | DB バックアップ（専用コンテナ・crond） |
 | [plan/db-check-missing.md](./plan/db-check-missing.md) | DB 欠損チェックスクリプト |
+| [plan/time-decay-embedding.md](./plan/time-decay-embedding.md) | 時間減衰サンプルウェイト + Embeddingハイブリッドの検討 |
 
 ---
 
