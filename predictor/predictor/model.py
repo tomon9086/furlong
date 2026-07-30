@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from predictor.calibration import CalibratedModels
-from predictor.preprocessing import get_feature_columns
+from predictor.preprocessing import compute_time_decay_weight, get_feature_columns
 
 _MODEL_DIR = Path(__file__).parent.parent / "models"
 
@@ -59,7 +59,9 @@ def _softmax(arr: np.ndarray) -> np.ndarray:
     return e / e.sum()
 
 
-def _build_dataset(df: pd.DataFrame, label_col: str) -> lgb.Dataset:
+def _build_dataset(
+    df: pd.DataFrame, label_col: str, weight: np.ndarray | None = None
+) -> lgb.Dataset:
     features = get_feature_columns()
     available = [f for f in features if f in df.columns]
     X = df[available].copy()
@@ -67,19 +69,29 @@ def _build_dataset(df: pd.DataFrame, label_col: str) -> lgb.Dataset:
     return lgb.Dataset(
         X,
         label=df[label_col],
+        weight=weight,
         categorical_feature=cat_cols if cat_cols else "auto",
         free_raw_data=False,
     )
 
 
-def _build_rank_dataset(df: pd.DataFrame) -> lgb.Dataset:
+def _build_rank_dataset(
+    df: pd.DataFrame, weight: np.ndarray | None = None
+) -> lgb.Dataset:
     """lambdarank 用データセットを構築する（group=レース単位）。
 
     レース内の着順から関連度ラベルを計算し、レース単位のグループ情報を付与する。
     関連度ラベル: 勝ち馬 = (出走頭数 - 1)、最下位 = 0。
     LightGBM は group 内でのみラベルを比較するため、頭数が異なるレース間での
     ラベル値の差は問題にならない。
+
+    ``weight`` は ``df`` の行順に対応する配列で渡すこと（内部でソート後の順序に
+    並び替える）。
     """
+    if weight is not None:
+        df = df.copy()
+        df["_sample_weight"] = weight
+
     # レース・馬番順にソートしてグループの連続性を保証
     df_s = df.sort_values(["race_id", "horse_number"]).reset_index(drop=True)
 
@@ -97,26 +109,58 @@ def _build_rank_dataset(df: pd.DataFrame) -> lgb.Dataset:
     # グループサイズ: レース単位の出走頭数（race_id 昇順 = df_s の行順と一致）
     group = df_s.groupby("race_id")["horse_number"].count().tolist()
 
+    sorted_weight = df_s["_sample_weight"].to_numpy() if weight is not None else None
+
     return lgb.Dataset(
         X,
         label=rank_label,
         group=group,
+        weight=sorted_weight,
         categorical_feature=cat_cols if cat_cols else "auto",
         free_raw_data=False,
     )
 
 
-def train(train_df: pd.DataFrame) -> Models:
+def train(
+    train_df: pd.DataFrame,
+    half_life_days: float | None = None,
+    reference_date: "pd.Timestamp | None" = None,
+    win_params: dict | None = None,
+    place_params: dict | None = None,
+) -> Models:
     """学習データで lambdarank (勝ち順位) と binary (複勝) の LightGBM モデルを学習する。
 
     勝ちモデル: lambdarank でレース内順位を直接最適化（group=レース単位）。
     複勝モデル: 従来どおり binary classification。
-    """
-    rank_ds = _build_rank_dataset(train_df)
-    place_ds = _build_dataset(train_df, "is_placed")
 
-    win_model = lgb.train(_RANK_PARAMS, rank_ds, num_boost_round=_NUM_BOOST_ROUND)
-    place_model = lgb.train(_PARAMS, place_ds, num_boost_round=_NUM_BOOST_ROUND)
+    Parameters
+    ----------
+    half_life_days : float | None
+        指定した場合、レース日付からの経過日数に応じた指数減衰サンプルウェイトを
+        適用する（半減期＝指定日数）。``None``（デフォルト）の場合は従来どおり
+        重みなしで学習する。
+    reference_date : pd.Timestamp | None
+        時間減衰の基準日。``None`` の場合は ``train_df["date"]`` の最大値を使う。
+    win_params, place_params : dict | None
+        LightGBM ハイパーパラメータの上書き（Optuna 連携用）。指定したキーのみ
+        デフォルトパラメータに上書きされる。
+    """
+    weight: np.ndarray | None = None
+    if half_life_days is not None:
+        if reference_date is None:
+            reference_date = train_df["date"].max()
+        weight = compute_time_decay_weight(
+            train_df["date"], reference_date, half_life_days
+        )
+
+    rank_ds = _build_rank_dataset(train_df, weight=weight)
+    place_ds = _build_dataset(train_df, "is_placed", weight=weight)
+
+    rank_params = {**_RANK_PARAMS, **(win_params or {})}
+    bin_params = {**_PARAMS, **(place_params or {})}
+
+    win_model = lgb.train(rank_params, rank_ds, num_boost_round=_NUM_BOOST_ROUND)
+    place_model = lgb.train(bin_params, place_ds, num_boost_round=_NUM_BOOST_ROUND)
 
     return Models(win=win_model, place=place_model)
 

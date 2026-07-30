@@ -1,5 +1,6 @@
 """predictor.preprocessing の単体テスト."""
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -7,6 +8,7 @@ from predictor.preprocessing import (
     _parse_finish_time,
     _parse_first_corner,
     compute_recent_stats,
+    compute_time_decay_weight,
     preprocess,
     split_by_date,
     walk_forward_splits,
@@ -285,6 +287,37 @@ class TestComputeRecentStats:
         result = compute_recent_stats(df)
         h0_r1 = result[(result["horse_id"] == "H0") & (result["race_id"] == "R1")]
         assert h0_r1["course_type_change"].iloc[0] == pytest.approx(1.0)
+
+
+# ──────────────────────────────────────────────
+# compute_time_decay_weight
+# ──────────────────────────────────────────────
+
+
+class TestComputeTimeDecayWeight:
+    def test_reference_date_weight_is_one(self):
+        """reference_date と同じ日付の行はウェイト1.0になること。"""
+        dates = pd.Series(pd.to_datetime(["2024-01-01"]))
+        w = compute_time_decay_weight(dates, pd.Timestamp("2024-01-01"), 365)
+        assert w[0] == pytest.approx(1.0)
+
+    def test_half_life_halves_weight(self):
+        """half_life_days 経過した行はウェイトがちょうど半分になること。"""
+        dates = pd.Series(pd.to_datetime(["2023-01-01"]))
+        w = compute_time_decay_weight(dates, pd.Timestamp("2024-01-01"), 365)
+        assert w[0] == pytest.approx(0.5, rel=1e-3)
+
+    def test_older_dates_get_smaller_weight(self):
+        """古い日付ほどウェイトが小さくなること（単調減少）。"""
+        dates = pd.Series(pd.to_datetime(["2020-01-01", "2022-01-01", "2024-01-01"]))
+        w = compute_time_decay_weight(dates, pd.Timestamp("2024-01-01"), 365)
+        assert w[0] < w[1] < w[2]
+
+    def test_returns_ndarray(self):
+        dates = pd.Series(pd.to_datetime(["2024-01-01", "2023-06-01"]))
+        w = compute_time_decay_weight(dates, pd.Timestamp("2024-01-01"), 1095)
+        assert isinstance(w, np.ndarray)
+        assert len(w) == 2
 
 
 # ──────────────────────────────────────────────

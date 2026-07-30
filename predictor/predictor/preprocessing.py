@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+import numpy as np
 import pandas as pd
 import psycopg
 
@@ -690,6 +691,34 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
     df = df.drop(columns=["_distance_band"])
 
     return df
+
+
+def compute_time_decay_weight(
+    race_date: pd.Series,
+    reference_date: pd.Timestamp,
+    half_life_days: float,
+) -> np.ndarray:
+    """レース日付からの経過日数に応じた指数減衰サンプルウェイトを計算する。
+
+    ``reference_date`` から ``half_life_days`` 日離れるごとにウェイトが半減する。
+    直近レースほど大きい重みになる（非定常性への対処）。
+
+    Parameters
+    ----------
+    race_date : pd.Series
+        datetime64 型の日付列。
+    reference_date : pd.Timestamp
+        基準日（通常は学習データの最新レース日）。
+    half_life_days : float
+        重みが半減するまでの日数。
+
+    Returns
+    -------
+    np.ndarray
+        各行に対応するサンプルウェイト（``reference_date`` の行が 1.0 で最大）。
+    """
+    days_from_reference = (reference_date - race_date).dt.days
+    return (0.5 ** (days_from_reference / half_life_days)).to_numpy()
 
 
 def get_feature_columns() -> list[str]:
