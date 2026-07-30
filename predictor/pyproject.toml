@@ -12,6 +12,7 @@ dependencies = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.29",
     "optuna>=3.6",
+    "torch>=2.2",
 ]
 
 [tool.uv.sources]
