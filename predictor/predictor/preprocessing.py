@@ -721,9 +721,16 @@ def compute_time_decay_weight(
     return (0.5 ** (days_from_reference / half_life_days)).to_numpy()
 
 
-def get_feature_columns() -> list[str]:
-    """学習・推論に使う特徴量カラム名の一覧を返す。"""
-    return [
+def get_feature_columns(extra_columns: list[str] | None = None) -> list[str]:
+    """学習・推論に使う特徴量カラム名の一覧を返す。
+
+    Parameters
+    ----------
+    extra_columns : list[str] | None
+        末尾に追加する特徴量カラム名（Embedding特徴量統合用）。``None``
+        （デフォルト）の場合は従来どおりの一覧をそのまま返す。
+    """
+    cols = [
         # レース条件
         "venue",
         "course_type",
@@ -790,6 +797,9 @@ def get_feature_columns() -> list[str]:
         # 枠番 × 距離帯
         "bracket_distance_avg_finish",
     ]
+    if extra_columns:
+        cols = cols + list(extra_columns)
+    return cols
 
 
 def split_by_date(

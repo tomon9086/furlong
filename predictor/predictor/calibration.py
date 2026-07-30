@@ -17,8 +17,6 @@ import pandas as pd
 from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 
-from predictor.preprocessing import get_feature_columns
-
 if TYPE_CHECKING:
     from predictor.model import Models
 
@@ -65,10 +63,13 @@ class CalibratedModels(NamedTuple):
     raw_place: lgb.Booster
 
 
-def _extract_features(df: pd.DataFrame) -> pd.DataFrame:
-    """特徴量カラムのみを抽出した DataFrame を返す。"""
-    features = get_feature_columns()
-    available = [f for f in features if f in df.columns]
+def _extract_features(df: pd.DataFrame, booster: lgb.Booster) -> pd.DataFrame:
+    """指定した Booster が学習時に使ったカラムのみを抽出した DataFrame を返す。
+
+    ``get_feature_columns()`` を再計算せず Booster 自身の ``feature_name()`` を
+    使うことで、Embedding 特徴量の有無に関わらず学習時と厳密に一致させる。
+    """
+    available = [f for f in booster.feature_name() if f in df.columns]
     return df[available].copy()
 
 
@@ -104,10 +105,8 @@ def calibrate_models(
     ValueError
         ``method`` が ``"isotonic"`` / ``"sigmoid"`` 以外の場合。
     """
-    X = _extract_features(calib_df)
-
-    win_raw = models.win.predict(X)
-    place_raw = models.place.predict(X)
+    win_raw = models.win.predict(_extract_features(calib_df, models.win))
+    place_raw = models.place.predict(_extract_features(calib_df, models.place))
 
     win_calib = _Calibrator(method).fit(win_raw, calib_df["is_win"].to_numpy())
     place_calib = _Calibrator(method).fit(place_raw, calib_df["is_placed"].to_numpy())
@@ -135,9 +134,12 @@ def predict_calibrated(
     tuple[np.ndarray, np.ndarray]
         ``(win_probs, place_probs)`` の較正済み確率ベクトル。
     """
-    X = _extract_features(df)
-    win_raw: np.ndarray = calibrated.raw_win.predict(X)
-    place_raw: np.ndarray = calibrated.raw_place.predict(X)
+    win_raw: np.ndarray = calibrated.raw_win.predict(
+        _extract_features(df, calibrated.raw_win)
+    )
+    place_raw: np.ndarray = calibrated.raw_place.predict(
+        _extract_features(df, calibrated.raw_place)
+    )
     win_probs = calibrated.win.predict(win_raw)
     place_probs = calibrated.place.predict(place_raw)
     return win_probs, place_probs

@@ -60,9 +60,12 @@ def _softmax(arr: np.ndarray) -> np.ndarray:
 
 
 def _build_dataset(
-    df: pd.DataFrame, label_col: str, weight: np.ndarray | None = None
+    df: pd.DataFrame,
+    label_col: str,
+    weight: np.ndarray | None = None,
+    extra_feature_columns: list[str] | None = None,
 ) -> lgb.Dataset:
-    features = get_feature_columns()
+    features = get_feature_columns(extra_columns=extra_feature_columns)
     available = [f for f in features if f in df.columns]
     X = df[available].copy()
     cat_cols = [c for c in X.columns if X[c].dtype.name == "category"]
@@ -76,7 +79,9 @@ def _build_dataset(
 
 
 def _build_rank_dataset(
-    df: pd.DataFrame, weight: np.ndarray | None = None
+    df: pd.DataFrame,
+    weight: np.ndarray | None = None,
+    extra_feature_columns: list[str] | None = None,
 ) -> lgb.Dataset:
     """lambdarank 用データセットを構築する（group=レース単位）。
 
@@ -95,7 +100,7 @@ def _build_rank_dataset(
     # レース・馬番順にソートしてグループの連続性を保証
     df_s = df.sort_values(["race_id", "horse_number"]).reset_index(drop=True)
 
-    features = get_feature_columns()
+    features = get_feature_columns(extra_columns=extra_feature_columns)
     available = [f for f in features if f in df_s.columns]
     X = df_s[available].copy()
     cat_cols = [c for c in X.columns if X[c].dtype.name == "category"]
@@ -127,6 +132,7 @@ def train(
     reference_date: "pd.Timestamp | None" = None,
     win_params: dict | None = None,
     place_params: dict | None = None,
+    embedding_feature_columns: list[str] | None = None,
 ) -> Models:
     """学習データで lambdarank (勝ち順位) と binary (複勝) の LightGBM モデルを学習する。
 
@@ -144,6 +150,10 @@ def train(
     win_params, place_params : dict | None
         LightGBM ハイパーパラメータの上書き（Optuna 連携用）。指定したキーのみ
         デフォルトパラメータに上書きされる。
+    embedding_feature_columns : list[str] | None
+        ``train_df`` に事前追加済みの Embedding 特徴量カラム名（
+        ``embedding_features.add_embedding_features`` の戻り値）。指定した場合、
+        既存の特徴量に追加して学習に使う。``None``（デフォルト）の場合は従来どおり。
     """
     weight: np.ndarray | None = None
     if half_life_days is not None:
@@ -153,8 +163,15 @@ def train(
             train_df["date"], reference_date, half_life_days
         )
 
-    rank_ds = _build_rank_dataset(train_df, weight=weight)
-    place_ds = _build_dataset(train_df, "is_placed", weight=weight)
+    rank_ds = _build_rank_dataset(
+        train_df, weight=weight, extra_feature_columns=embedding_feature_columns
+    )
+    place_ds = _build_dataset(
+        train_df,
+        "is_placed",
+        weight=weight,
+        extra_feature_columns=embedding_feature_columns,
+    )
 
     rank_params = {**_RANK_PARAMS, **(win_params or {})}
     bin_params = {**_PARAMS, **(place_params or {})}
@@ -242,11 +259,12 @@ def predict(models: Models | CalibratedModels, df: pd.DataFrame) -> pd.DataFrame
 
         win_probs, place_probs = predict_calibrated(models, df)
     else:
-        features = get_feature_columns()
-        available = [f for f in features if f in df.columns]
-        X = df[available].copy()
-        win_probs = models.win.predict(X)
-        place_probs = models.place.predict(X)
+        # 学習済み Booster 自身の feature_name() を使う（Embedding 特徴量の
+        # 有無に関わらず、学習時に実際に使われたカラム集合と厳密に一致させるため）。
+        win_features = [f for f in models.win.feature_name() if f in df.columns]
+        place_features = [f for f in models.place.feature_name() if f in df.columns]
+        win_probs = models.win.predict(df[win_features])
+        place_probs = models.place.predict(df[place_features])
 
     result = df[["race_id", "horse_number", "horse_id"]].copy()
     if "horse_name" in df.columns:
