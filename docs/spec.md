@@ -261,6 +261,16 @@ furlong/
 
 > **市場オッズ（`odds`, `popularity`）は学習特徴量から除外。** 確定オッズを含めると「市場オッズの模倣」になり控除率分の損失が上限となるため。事前オッズ（`pre_race_odds.win_odds`）は EV 計算にのみ使用する。
 
+#### 時間減衰サンプルウェイト（オプション機能）
+
+`model.train(train_df, half_life_days=...)` で、レース日付からの経過日数に応じた指数減衰サンプルウェイト（`preprocessing.compute_time_decay_weight`）を学習時に適用できる。`half_life_days=None`（デフォルト）の場合は従来どおり重みなしで学習し、既存の挙動と完全互換。
+
+- 基準日（`reference_date`）はデフォルトで学習データ（`train_df`）の `date` 最大値。
+- CLI: `python -m predictor.main train --half-life-days 1095`（半減期を日数で指定。未指定時は重みなし）。
+- 比較実験: `python -m predictor.main compare-half-life` で `half_life_days ∈ {365, 1095, 1825, 3650, None}` を学習・較正・評価し、`output/half_life_comparison_{timestamp}.csv` に結果を保存する。
+- Optuna 連携（`predictor/predictor/tuning.py`）: `python -m predictor.main tune [--n-trials N]` で `num_leaves`, `learning_rate`, `min_child_samples`, `feature_fraction`, `half_life_days` を walk-forward 平均回収率を目的関数として探索する。
+- **検証結果（2026-07-30、詳細は [experiments.md](./experiments.md) 参照）**: (1) 単一 split で `half_life_days` のみ比較 → 重みなしが win_accuracy・Log Loss で最良。(2) Optuna 同時探索（n_trials=10）→ walk-forward平均回収率では `half_life_days=1095` を含む組み合わせが最良（84.08%）。(3) しかしその最良パラメータを標準の train/val/test split で再学習し bootstrap CI で検証したところ、**win_accuracy・Log Loss・回収率のすべてで重みなしのデフォルトパラメータより悪化**（汎化しなかった）。3段階の検証を通じて**時間減衰サンプルウェイトが改善するという信頼できる証拠は得られておらず、現時点ではデフォルト（`half_life_days=None`、重みなし）の維持を推奨する**。
+
 #### 出力
 
 標準出力（テキスト形式）および CSV ファイル（`output/prediction_{race_id}.csv`）。

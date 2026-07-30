@@ -604,3 +604,89 @@ MC win_prob は入力 win_prob とほぼ一致するため（サニティチェ�
 
 **次のアクション**: MC 拡張（フェーズ3: 組合せ馬券への展開）は保留。
 アンサンブル／特徴量改善（フェーズ4）に注力する。
+
+---
+
+## 時間減衰サンプルウェイト（half_life_days）比較（2026-07-30）
+
+> 実装・計画: [plan/time-decay-embedding.md](./plan/time-decay-embedding.md)
+
+`model.train(train_df, half_life_days=...)` で `compute_time_decay_weight` によるサンプルウェイトを学習に適用し、単一の train/val/test split（`split_by_date` デフォルト比率）で `half_life_days ∈ {365, 1095, 1825, 3650, None}` を比較。学習は train で実施、較正は val、評価は test。
+
+| half_life_days | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| 1年 | 17.99% | 73.21% | 0.2455 | 0.4900 |
+| 3年 | 18.31% | 70.68% | 0.2442 | 0.4869 |
+| 5年 | 18.89% | 72.16% | 0.2431 | 0.4860 |
+| 10年 | 19.42% | 74.41% | 0.2423 | 0.4845 |
+| 無限大（重みなし） | **20.37%** | 73.06% | **0.2406** | **0.4815** |
+
+生データ: [output/half_life_comparison_20260730_102725.csv](../output/half_life_comparison_20260730_102725.csv)
+
+### 所感
+
+- **win_accuracy・Log Loss（単勝・複勝とも）は半減期を短くするほど単調に悪化**し、重みなし（無限大）が全指標で最良。想定していた「非定常性への対処で直近を重視すれば精度が上がる」という仮説とは逆の結果。
+- 半減期を短くするほど実効サンプルサイズが縮小し、学習データの大半が減衰でほぼ無視される状態になる。今回の `split_by_date`（train の直後にval/testが続く時系列分割）では train 末尾と test の間の時間差が小さいため、極端な減衰が「学習データを間引く」だけの効果になり、非定常性対処のメリットより実効サンプル減少のデメリットが上回った可能性がある。
+- **回収率は非単調**（10年が最高74.4%、3年が最低70.7%、差 3.7pp）。単一 split・数千ベット規模のため、[plan/prediction-accuracy-followup.md](./plan/prediction-accuracy-followup.md) で指摘されている「回収率は分散が大きく bootstrap CI が必須」の通り、この差が有意かは未検証。
+- 特徴量重要度（gain, 勝ちモデル）の上位構成は half_life_days=365 と無重み（None）でほぼ変わらず、重み付けによる特徴量の使われ方の質的な変化は確認できなかった。
+
+### 判定: 時間減衰重み付けは効果があるか
+
+**→ 現時点では非推奨。** 単一 split では重みなしが Log Loss・win_accuracy で明確に優位、回収率は非単調でノイズと区別できない。導入するなら以下を先に行うこと:
+
+1. Walk-forward（5フォールド）+ bootstrap CI で複数期間にわたり回収率差が有意かを確認する
+2. `tuning.py` の Optuna 探索（`half_life_days` を LightGBM ハイパーパラメータと同時探索）で、他パラメータとの組み合わせ次第で改善するかを確認する
+
+**次のアクション**: Optuna チューニング（`python -m predictor.main tune`）を実行し、`half_life_days` を含めた最良パラメータの組み合わせを探索する。
+
+### 特徴量重要度の変化（無重み vs half_life_days=365、勝ちモデル gain）
+
+| 順位（無重み） | 特徴量 | 無重み | half_life=365 | half_life=365 での順位 |
+|---|---|---|---|---|
+| 1 | `trainer_id` | 119,832 | 6,358 | 4 |
+| 2 | `avg_finish_last3` | 103,785 | 7,074 | 2 |
+| 3 | `jockey_id` | 95,640 | 5,243 | 5 |
+| 4 | `avg_finish_last5` | 63,020 | 4,369 | 6 |
+| 5 | `dam` | 27,757 | 16,920 | 1 |
+
+Spearman 順位相関: **0.938**（上位15特徴量）。全体の重要度構成は概ね保たれるが、`dam`（母馬）が半減期365日では最重要特徴量に浮上し、`trainer_id`/`jockey_id`（累積統計に依存する特徴量）の相対重要度が下がる傾向。直近データに絞ると累積型の統計特徴量（学習データが少ないほどノイズが増える）の寄与が下がり、血統のような固定属性が相対的に重視されると考えられる。
+
+### Optuna 同時探索（n_trials=10, 2026-07-30）
+
+`python -m predictor.main tune --n-trials 10` で `num_leaves`, `learning_rate`, `min_child_samples`, `feature_fraction`, `half_life_days` を同時探索（walk-forward n_splits=3 の平均回収率を目的関数）。
+
+| 順位 | half_life_days | num_leaves | learning_rate | min_child_samples | feature_fraction | walk-forward平均回収率 |
+|---|---|---|---|---|---|---|
+| 1 | 1095（3年） | 182 | 0.1997 | 74 | 0.816 | **84.08%** |
+| 2 | none（重みなし） | 162 | 0.1960 | 100 | 0.620 | 82.86% |
+| 3 | 3650（10年） | 162 | 0.0798 | 47 | 0.574 | 82.16% |
+| 4〜10 | 各種 | - | - | - | - | 79.05〜80.94% |
+
+### 所感
+
+- 単独探索（`num_leaves` 等を default=63 に固定して `half_life_days` のみ比較、上記「half_life_days 比較」参照）では重みなしが最良だったが、**パラメータを同時探索すると `half_life_days=1095`（3年）+ 高学習率(0.20)・大きめ `num_leaves`(182)・大きめ `min_child_samples`(74) の組み合わせが最良**になった。これは「実効サンプルサイズが減った分、モデル容量側も調整すれば時間減衰が活きる」という仮説と整合する。
+- ただし **n_trials=10 は5次元空間に対して探索予算が小さく**、上位3件の差（84.08% / 82.86% / 82.16%）が意味のある差かはこの回数では判断できない。walk-forward n_splits=3 と回収率自体の分散の大きさ（[plan/prediction-accuracy-followup.md](./plan/prediction-accuracy-followup.md)）を踏まえると、確定的な結論には至っていない。
+
+### 次のアクション
+
+- `n_trials` を増やして（30〜50程度）再実行し、上位パラメータの傾向が安定するか確認する
+- 最良パラメータ候補を通常の `split_by_date`（train/val/test）で再学習し、bootstrap CI 付きで単一splitの回収率を検証する
+
+### Bootstrap CI による最終検証（Optuna最良パラメータ vs baseline、2026-07-30）
+
+Optuna探索で最良だった組み合わせ（`half_life_days=1095`, `num_leaves=182`, `learning_rate=0.1997`, `min_child_samples=74`, `feature_fraction=0.816`）を、通常の `split_by_date`（train/val/test）で学習・較正し、単勝 top1 戦略の回収率を bootstrap CI（n_bootstrap=10,000）で baseline（重みなし・デフォルトパラメータ）と比較した。
+
+| | win_accuracy | recovery_rate (evaluate) | 回収率 point estimate (odds欠損720件除外) | 95% CI |
+|---|---|---|---|---|
+| baseline（重みなし・デフォルト） | 20.37% | 73.06% | 78.14% | [73.16%, 83.50%] |
+| tuned（Optuna最良パラメータ） | **15.91%**（大幅悪化） | **70.83%**（悪化） | 75.75% | [69.17%, 82.81%] |
+
+### 判定
+
+**Optuna の「最良パラメータ」は通常のホールドアウトに汎化しなかった。** walk-forward平均回収率では tuned (84.08%) が baseline (82.86%) を上回っていたが、標準の train/val/test split で再評価すると win_accuracy・Log Loss・回収率のすべてで baseline に劣る結果になった。これは「回収率という分散の大きい指標を n_trials=10・n_splits=3 という小さい探索予算で最適化すると、特定のfold構成のノイズにフィットするだけで真の改善にならない」という典型的な過学習パターンと考えられる。
+
+さらに、baseline・tuned とも 95% CI の上限（83.50% / 82.81%）が 100% を下回っており、**単勝 top1 戦略はどちらの設定でも高い確度で損失側**（想定通り。単勝 top1 の素朴な戦略で黒字化しないことは [prediction-accuracy-followup.md](./plan/prediction-accuracy-followup.md) の既存知見と整合）。
+
+### 時間減衰重み付けタスクの最終結論
+
+3段階の検証（単独split比較 → Optuna同時探索 → 標準splitでのbootstrap CI再検証）を通じて、**時間減衰サンプルウェイトが回収率・Log Lossを改善するという信頼できる証拠は得られなかった**。実装（`compute_time_decay_weight`, `model.train(half_life_days=...)`, CLIフラグ, `tuning.py`）は非破壊的に追加済みで `half_life_days=None`（デフォルト）なら既存挙動と完全互換のため、今後さらに大きな探索予算（n_trials=50〜100等）で再検証する余地は残すが、**現時点ではデフォルト（重みなし）を維持することを推奨**する。
