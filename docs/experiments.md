@@ -718,3 +718,20 @@ Optuna探索で最良だった組み合わせ（`half_life_days=1095`, `num_leav
 ### 現時点の結論
 
 Embeddingハイブリッドの効果は**未確定**。実装（`embedding.py`, `embedding_features.py`, CLI統合）は非破壊的に追加済みで `--use-embeddings` を指定しない限り既存挙動と完全互換のため、デフォルトでは無効のまま維持する。本格的な採用判断には、時間減衰の検証で行ったのと同様に walk-forward + bootstrap CI での再検証、または Optuna への `embedding_pca_dim` 追加探索が必要。
+
+### Bootstrap CI による最終検証（baseline vs Embedding+PCA、2026-07-31）
+
+上記比較のうち baseline と Embedding+PCA（4カテゴリ×6次元=24列）について、単勝 top1 戦略の回収率を bootstrap CI（n_bootstrap=10,000）で比較した。
+
+| | 回収率（evaluate） | Bootstrap 点推定（odds欠損720件除外） | 95% CI |
+|---|---|---|---|
+| baseline（Embeddingなし） | 73.06% | 78.14% | [73.16%, 83.50%] |
+| Embedding + PCA（dim=6） | 74.45% | 79.63% | [74.36%, 85.38%] |
+
+### 判定
+
+**+1.4〜1.5pt の改善は統計的に有意ではない。** 両者の 95% CI はほぼ全域が重なっており（baseline の上限 83.50% は embeddings の範囲内、embeddings の下限 74.36% は baseline の範囲内）、点推定の差は誤差の範囲内と判断するのが妥当。両設定とも CI 上限が 100% を下回っており、単勝 top1 戦略はどちらも高い確度で損失側（想定通り）。
+
+### Embeddingハイブリッドタスクの最終結論
+
+時間減衰重み付け（タスク1）と同じ構造の結論になった。単一 split の点推定・Log Loss 比較・bootstrap CI の3段階を通じて、**Embeddingハイブリッドが改善するという信頼できる証拠は得られなかった**。実装（`embedding.py`, `embedding_features.py`, `--use-embeddings` フラグ）は非破壊的に追加済みでデフォルトでは無効のため、今後さらに大きな検証予算（walk-forward再検証、embedding_pca_dim の Optuna 探索等）を割く余地は残すが、**現時点ではデフォルト（Embeddingなし）を維持することを推奨する**。

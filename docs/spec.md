@@ -281,7 +281,7 @@ furlong/
 - **LightGBM統合**: `python -m predictor.main train --use-embeddings [--embedding-pca-dim N]` で有効化。`--embedding-pca-dim` を指定すると各カテゴリの Embedding テーブルを PCA でその次元数に圧縮してから使用する。
 - **類似度確認**: `python -m predictor.main similar-embeddings <category> <id> [--top-n N]` でコサイン類似度上位を表示できる。
 - **重要な実装上の注意（torch と lightgbm のプロセス分離）**: この環境では torch と lightgbm を同一プロセスで読み込むと OpenMP ランタイムの競合により `lgb.Dataset.construct()` がセグメンテーション違反を起こすことを確認済み。そのため定数を torch 非依存の `embedding_common.py` に切り出し、LightGBM の学習・推論パス（`model.py`, `embedding_features.py`）が `embedding.py`（torch 依存）を import しない設計にしている。`predict()` / `calibration._extract_features()` は `get_feature_columns()` を再計算せず学習済み Booster 自身の `feature_name()` を使うことで、Embedding 特徴量の有無に関わらず学習時と厳密に同じカラム集合を参照する。
-- **検証結果（2026-07-30、詳細は [experiments.md](./experiments.md) 参照）**: 標準 train/val/test split で比較したところ、生の Embedding（73次元）は全指標で悪化。PCA圧縮（4カテゴリ×6次元=24列）は回収率が 73.06%→74.45%（+1.4pt）と改善したが、より安定した指標である Log Loss は横ばい〜微悪化。**単一splitでは効果を断定できず、現時点では未確定**。デフォルトでは `use_embeddings=False` のため既存挙動に影響なし。
+- **検証結果（2026-07-30〜31、詳細は [experiments.md](./experiments.md) 参照）**: 標準 train/val/test split で比較したところ、生の Embedding（73次元）は全指標で悪化。PCA圧縮（4カテゴリ×6次元=24列）は回収率が 73.06%→74.45%（+1.4pt）と改善したが、より安定した指標である Log Loss は横ばい〜微悪化。さらに単勝 top1 戦略の回収率を bootstrap CI（n=10,000）で検証したところ、baseline [73.16%, 83.50%] と embedding+PCA [74.36%, 85.38%] の 95% CI はほぼ全域が重なり、**+1.4pt の改善は統計的に有意ではない**ことを確認。3段階の検証を通じて**Embeddingハイブリッドが改善するという信頼できる証拠は得られておらず、現時点ではデフォルト（`use_embeddings=False`、Embeddingなし）の維持を推奨する**。
 
 #### 出力
 
