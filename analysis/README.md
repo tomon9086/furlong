@@ -49,3 +49,4 @@ df = query_df("SELECT * FROM races LIMIT 10")
 |---|---|
 | `notebooks/01_data_overview.ipynb` | 各テーブルの件数・期間・欠損率など、データ全体のヘルスチェック |
 | `notebooks/02_recovery_rate_analysis.ipynb` | 人気別の単勝・複勝回収率（モデルなしのベースライン把握） |
+| `notebooks/03_recovery_rate_by_condition.ipynb` | 人気別回収率を、レース条件（コース種別・馬場状態・距離帯・頭数帯）でさらに分解 |
