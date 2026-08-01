@@ -399,7 +399,18 @@ def tune_mode(n_trials: int = 30) -> None:
     logger.info("--- 最良パラメータ ---")
     for k, v in study.best_params.items():
         logger.info(f"  {k}: {v}")
-    logger.info(f"最良スコア（walk-forward平均回収率）: {study.best_value:.4f}")
+    logger.info(f"最良スコア（walk-forward平均win_logloss）: {study.best_value:.4f}")
+    logger.info(
+        "  （参考）対応する回収率: "
+        f"{study.best_trial.user_attrs['recovery_rate']:.4f}"
+    )
+
+    logger.info("--- 上位トライアル（win_logloss順、参考の回収率つき） ---")
+    for t in tuning.top_trials(study, n=5):
+        logger.info(
+            f"  #{t['number']}: win_logloss={t['win_logloss']:.4f}, "
+            f"recovery_rate={t['recovery_rate']:.4f}, params={t['params']}"
+        )
 
 
 def compare_half_life_mode() -> None:
