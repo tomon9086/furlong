@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from predictor.evaluation import _pop_tier
 from predictor.simulation import (
     DEFAULT_N_ITER as _MC_DEFAULT_N_ITER,
     quinella_probability as _quinella_probability,
@@ -21,6 +24,88 @@ _EV_THRESHOLD = 1.5
 _MC_SEED = 42
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class Strategy:
+    """買い目選定戦略の設定。
+
+    ``popularity_tiers`` は人気帯によるフィルタ（``None`` なら全人気帯）。
+    ``ev_threshold`` は ``win_prob × win_odds`` によるEVフィルタ（``None`` ならフィルタなし）。
+    """
+
+    name: str
+    bet_type: str  # "win" | "wide"
+    popularity_tiers: tuple[str, ...] | None
+    ev_threshold: float | None
+    note: str
+
+
+# 2026-08-01 の walk-forward プール bootstrap CI 検証（docs/plan/prediction-accuracy-followup.md）に基づく設定。
+STRATEGIES: tuple[Strategy, ...] = (
+    Strategy(
+        name="堅実",
+        bet_type="wide",
+        popularity_tiers=("2-3番人気",),
+        ev_threshold=1.5,
+        note=(
+            "walk-forward 26年分プールで点推定95.0%・CI[79.8%, 111.7%]（n=913）。"
+            "有意ではないが検証済み候補の中で最も損益分岐点に近い。"
+        ),
+    ),
+    Strategy(
+        name="大穴",
+        bet_type="win",
+        popularity_tiers=("7番人気以下",),
+        ev_threshold=None,
+        note=(
+            "回収率は検証上マイナス（pooled 点推定46〜64%、CI上限も100%未達）。"
+            "期待値でなく一撃のリターンを狙うレクリエーション枠。少額に限定して運用すること。"
+        ),
+    ),
+)
+
+
+def _select_strategy_pick(
+    win_probs_raw: np.ndarray,
+    ev_vals: np.ndarray | None,
+    tier_labels: np.ndarray,
+    strategy: Strategy,
+) -> tuple[list[int], float | None]:
+    """レース内の win_prob 最大馬（1位人気予想馬）を戦略条件で判定し、
+    bet_type に応じて win_prob 上位N頭を選ぶ。
+
+    ``evaluation.ev_bet_records`` のバックテストロジックと同一にする必要がある:
+    EV・人気帯の条件判定は「そのレースの win_prob 最大馬」のみに適用し、
+    馬連・ワイド・三連複の相手馬は MC 確率ではなく win_prob 順位でそのまま選ぶ
+    （バックテストで測定した回収率と現実の買い目を一致させるため）。
+
+    Returns
+    -------
+    tuple[list[int], float | None]
+        選ばれた馬のグループ内位置（0始まり、win_prob降順）のリストと、
+        win_prob 最大馬の EV（対象外は None）。条件を満たさない場合は空リスト。
+    """
+    n = len(win_probs_raw)
+    if n == 0:
+        return [], None
+
+    top1 = int(np.argmax(win_probs_raw))
+
+    if strategy.popularity_tiers is not None and (
+        tier_labels[top1] not in strategy.popularity_tiers
+    ):
+        return [], None
+    if strategy.ev_threshold is not None:
+        if ev_vals is None or not (ev_vals[top1] > strategy.ev_threshold):
+            return [], None
+
+    ev = float(ev_vals[top1]) if ev_vals is not None else None
+    n_horses = {"win": 1, "wide": 2}[strategy.bet_type]
+    if n < n_horses:
+        return [], None
+    order = np.argsort(-win_probs_raw)[:n_horses]
+    return [int(p) for p in order], ev
 
 
 def _mark_recommended(
@@ -52,6 +137,16 @@ def _mark_recommended(
     df["recommended_quinella"] = False
     df["recommended_wide"] = False
     df["recommended_trifecta_box"] = False
+    for strat in STRATEGIES:
+        df[f"recommended_{strat.name}"] = False
+        df[f"ev_{strat.name}"] = np.nan
+
+    if odds_col is not None:
+        df["_pop_rank"] = df.groupby("race_id")[odds_col].rank(
+            method="min", ascending=True
+        )
+    else:
+        df["_pop_rank"] = np.nan
 
     for race_id, group in df.groupby("race_id"):
         idx = group.index
@@ -67,6 +162,7 @@ def _mark_recommended(
         )
 
         # 単勝 EV（win_prob × win_odds）
+        ev_vals = None
         if odds_col is not None:
             win_odds_vals = group[odds_col].to_numpy(dtype=float)
             ev_vals = win_probs_raw * win_odds_vals
@@ -79,6 +175,22 @@ def _mark_recommended(
         else:
             best_pos = int(np.argmax(win_probs_raw))
             df.loc[idx[best_pos], "recommended_win"] = True
+
+        # 戦略別（堅実・大穴）の推奨買い目
+        tier_labels = np.array(
+            [
+                _pop_tier(p) if pd.notna(p) else None
+                for p in group["_pop_rank"].to_numpy()
+            ]
+        )
+        for strat in STRATEGIES:
+            positions, strat_ev = _select_strategy_pick(
+                win_probs_raw, ev_vals, tier_labels, strat
+            )
+            if positions:
+                df.loc[idx[positions], f"recommended_{strat.name}"] = True
+                if strat_ev is not None:
+                    df.loc[idx[positions], f"ev_{strat.name}"] = strat_ev
 
         # 複勝: place_prob 上位3頭
         place_prob_vals = (
@@ -135,7 +247,7 @@ def _mark_recommended(
         | df["recommended_trifecta_box"]
     )
 
-    return df
+    return df.drop(columns=["_pop_rank"])
 
 
 def print_prediction(pred_df: pd.DataFrame) -> None:
@@ -192,6 +304,25 @@ def print_prediction(pred_df: pd.DataFrame) -> None:
         if len(trifecta_horses) >= 3:
             hn = trifecta_horses["horse_number"].tolist()
             logger.info(f"    三連複: {hn[0]}-{hn[1]}-{hn[2]}")
+
+        logger.info("\n  戦略別推奨:")
+        for strat in STRATEGIES:
+            picked = group[group[f"recommended_{strat.name}"]].sort_values(
+                "horse_number"
+            )
+            hn = picked["horse_number"].tolist()
+            if not hn:
+                logger.info(f"    [{strat.name}] ({strat.bet_type}: 該当馬なし)")
+                continue
+            ev_col = f"ev_{strat.name}"
+            if ev_col in picked.columns and not picked[ev_col].isna().all():
+                ev_str = f" (EV={float(picked[ev_col].iloc[0]):.2f})"
+            else:
+                ev_str = ""
+            hn_str = "-".join(str(h) for h in hn)
+            logger.info(
+                f"    [{strat.name}] {strat.bet_type}: {hn_str}{ev_str}  ※{strat.note}"
+            )
 
 
 def _make_filename(
@@ -293,6 +424,19 @@ def _format_betting_toml(pred_df: pd.DataFrame) -> str:
             lines.append("trifecta_box = { horses = [] }")
 
         lines.append("")
+
+        for strat in STRATEGIES:
+            picked = group[group[f"recommended_{strat.name}"]].sort_values(
+                "horse_number"
+            )
+            lines.append(f'[race.strategies."{strat.name}"]')
+            lines.append(f'bet_type = "{strat.bet_type}"')
+            lines.append(f"horses = {_toml_list(picked['horse_number'].tolist())}")
+            ev_col = f"ev_{strat.name}"
+            if ev_col in picked.columns and not picked[ev_col].isna().all():
+                lines.append(f"ev = {round(float(picked[ev_col].iloc[0]), 4)}")
+            lines.append(f"note = {json.dumps(strat.note, ensure_ascii=False)}")
+            lines.append("")
 
     return "\n".join(lines)
 
