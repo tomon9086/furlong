@@ -261,15 +261,20 @@ furlong/
 
 > **市場オッズ（`odds`, `popularity`）は学習特徴量から除外。** 確定オッズを含めると「市場オッズの模倣」になり控除率分の損失が上限となるため。事前オッズ（`pre_race_odds.win_odds`）は EV 計算にのみ使用する。
 
-#### 時間減衰サンプルウェイト（オプション機能）
+#### 時間減衰サンプルウェイト・LightGBMハイパーパラメータ
 
-`model.train(train_df, half_life_days=...)` で、レース日付からの経過日数に応じた指数減衰サンプルウェイト（`preprocessing.compute_time_decay_weight`）を学習時に適用できる。`half_life_days=None`（デフォルト）の場合は従来どおり重みなしで学習し、既存の挙動と完全互換。
+`model.train(train_df, half_life_days=...)` で、レース日付からの経過日数に応じた指数減衰サンプルウェイト（`preprocessing.compute_time_decay_weight`）を学習時に適用できる。`half_life_days=None` を指定した場合は重みなしで学習する。
 
 - 基準日（`reference_date`）はデフォルトで学習データ（`train_df`）の `date` 最大値。
-- CLI: `python -m predictor.main train --half-life-days 1095`（半減期を日数で指定。未指定時は重みなし）。
+- CLI: `python -m predictor.main train --half-life-days 1095`（半減期を日数で指定。`--half-life-days none` で明示的に無効化。未指定時はデフォルト値 `1095` を使用）。
+- LightGBM パラメータ（`num_leaves`, `learning_rate`, `min_child_samples`, `feature_fraction`）も CLI から上書き可能: `--num-leaves N`, `--learning-rate F`, `--min-child-samples N`, `--feature-fraction F`（`predictor/predictor/model.py` の `win_params`/`place_params` に渡され、単勝・複勝モデルの両方に同じ値を適用する）。
 - 比較実験: `python -m predictor.main compare-half-life` で `half_life_days ∈ {365, 1095, 1825, 3650, None}` を学習・較正・評価し、`output/half_life_comparison_{timestamp}.csv` に結果を保存する。
 - Optuna 連携（`predictor/predictor/tuning.py`）: `python -m predictor.main tune [--n-trials N]` で `num_leaves`, `learning_rate`, `min_child_samples`, `feature_fraction`, `half_life_days` を探索する。目的関数は walk-forward 平均 `win_logloss`（最小化）。回収率は分散が大きく直接最適化すると特定の fold 構成のノイズに過学習しやすいため（下記2026-07-30の検証結果）、各 trial の walk-forward 平均回収率は `user_attrs["recovery_rate"]` に記録するのみに留め、`tuning.top_trials()` で Log Loss 上位の候補と回収率を並べて人手で確認する運用とする。
-- **検証結果（2026-07-30、詳細は [experiments.md](./experiments.md) 参照）**: (1) 単一 split で `half_life_days` のみ比較 → 重みなしが win_accuracy・Log Loss で最良。(2) Optuna 同時探索（n_trials=10）→ walk-forward平均回収率では `half_life_days=1095` を含む組み合わせが最良（84.08%）。(3) しかしその最良パラメータを標準の train/val/test split で再学習し bootstrap CI で検証したところ、**win_accuracy・Log Loss・回収率のすべてで重みなしのデフォルトパラメータより悪化**（汎化しなかった）。3段階の検証を通じて**時間減衰サンプルウェイトが改善するという信頼できる証拠は得られておらず、現時点ではデフォルト（`half_life_days=None`、重みなし）の維持を推奨する**。
+
+**デフォルトパラメータ（2026-08-01 更新、詳細は [experiments.md](./experiments.md) 参照）**: `model.py` の `_PARAMS`/`_RANK_PARAMS` は `num_leaves=127, learning_rate=0.0128, min_child_samples=41, feature_fraction=0.56`、`half_life_days` は CLI・`train_mode` ともデフォルト `1095` を採用。
+
+- **経緯**: 2026-07-30 の検証では、(1) 単一 split で `half_life_days` のみ比較 → 重みなしが最良。(2) Optuna 同時探索（`n_trials=10`、回収率を目的関数）→ walk-forward平均回収率では `half_life_days=1095` を含む組み合わせが最良（84.08%）。(3) しかしその最良パラメータを標準の train/val/test split で再学習し bootstrap CI で検証したところ、win_accuracy・Log Loss・回収率のすべてで重みなしのデフォルトパラメータより悪化（汎化しなかった）。これを受けて Optuna の目的関数を分散の小さい `win_logloss` に変更した。
+- **2026-08-01 の再検証**: `win_logloss` 最小化で探索した trial（`num_leaves=127, learning_rate=0.0128, min_child_samples=41, feature_fraction=0.56, half_life_days=1095`）を標準 train/val/test split で再学習したところ、win_accuracy（20.37%→21.27%）・win_logloss（0.2406→0.2376）・place_logloss（0.4815→0.4744）がいずれも改善し、回収率は誤差範囲で横ばい（73.06%→72.92%）だった。2026-07-30 とは異なり全指標で悪化する汎化失敗は再現せず、**目的関数を `win_logloss` に変更した設計が意図通り機能したことを確認**。ただし回収率自体は動いていないため、110%目標への寄与は限定的（精度改善であって黒字化ではない）。この結果を踏まえ、上記パラメータをデフォルトとして採用した。
 
 #### Embeddingハイブリッド（オプション機能）
 

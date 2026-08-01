@@ -22,12 +22,17 @@ logger = logging.getLogger(__name__)
 
 def _run_wf_fold(args: tuple) -> dict:
     """Walk-forward の1フォールドを実行するヘルパー（ProcessPoolExecutor 並列実行用）。"""
-    fold_idx, wf_train, wf_test, half_life_days = args
+    fold_idx, wf_train, wf_test, half_life_days, tuned_params = args
     from predictor import calibration as _calib_mod
     from predictor import evaluation
     from predictor import model as _model
 
-    wf_models = _model.train(wf_train, half_life_days=half_life_days)
+    wf_models = _model.train(
+        wf_train,
+        half_life_days=half_life_days,
+        win_params=tuned_params,
+        place_params=tuned_params,
+    )
     wf_calibrated = _calib_mod.calibrate_models(wf_models, wf_test)
     wf_pred = _model.predict(wf_calibrated, wf_test)
     wf_metrics = evaluation.evaluate(wf_test, wf_pred)
@@ -43,18 +48,21 @@ def _run_wf_fold(args: tuple) -> dict:
 
 def train_mode(
     walkforward: bool = True,
-    half_life_days: float | None = None,
+    half_life_days: float | None = 1095.0,
     use_embeddings: bool = False,
     embedding_pca_dim: int | None = None,
+    tuned_params: dict | None = None,
 ) -> None:
     """学習モード: 全データを使ってモデルを学習し保存する。
 
     Parameters
     ----------
     half_life_days : float | None
-        指定した場合、レース日付からの経過日数に応じた指数減衰サンプルウェイト
-        （半減期＝指定日数）を適用して学習する。``None``（デフォルト）の場合は
-        従来どおり重みなしで学習する。
+        レース日付からの経過日数に応じた指数減衰サンプルウェイト（半減期＝指定日数）
+        を適用して学習する。デフォルトは ``1095``（3年）。Optuna チューニング
+        （win_logloss 最小化、trial #23）で見つかった値で、標準 train/val/test
+        split での bootstrap CI 検証でも汎化を確認済み（2026-08-01、詳細は
+        docs/experiments.md 参照）。``None`` を指定した場合は重みなしで学習する。
     use_embeddings : bool
         True の場合、学習済み Embedding（``python -m predictor.main
         train-embeddings`` で事前学習・保存したもの）を特徴量に追加する。
@@ -62,6 +70,12 @@ def train_mode(
         情報リークを避けるため）。
     embedding_pca_dim : int | None
         指定した場合、Embedding を PCA でこの次元数に圧縮してから使用する。
+    tuned_params : dict | None
+        ``tune`` コマンドで見つけた LightGBM パラメータ（``num_leaves``,
+        ``learning_rate``, ``min_child_samples``, ``feature_fraction``）の
+        上書き。単勝・複勝モデルの両方に同じ値を適用する（``tuning._objective``
+        と同じ扱い）。``None``（デフォルト）の場合は ``model.py`` のデフォルト
+        パラメータを使う。
     """
     from predictor.preprocessing import (
         compute_recent_stats,
@@ -115,6 +129,8 @@ def train_mode(
         train_df,
         half_life_days=half_life_days,
         embedding_feature_columns=embedding_cols,
+        win_params=tuned_params,
+        place_params=tuned_params,
     )
 
     logger.info("評価中（較正前）...")
@@ -271,7 +287,7 @@ def train_mode(
 
         wf_splits = walk_forward_splits(df, n_splits=5)
         fold_args = [
-            (fold_idx, wf_train, wf_test, half_life_days)
+            (fold_idx, wf_train, wf_test, half_life_days, tuned_params)
             for fold_idx, (wf_train, wf_test) in enumerate(wf_splits, start=1)
         ]
         n_workers = min(len(fold_args), os.cpu_count() or 1)
@@ -502,26 +518,79 @@ def similar_embeddings_mode(category: str, id_value: str, top_n: int = 10) -> No
         logger.info(f"  {other_id}: {sim:.4f}")
 
 
-def _parse_half_life_days(argv: list[str]) -> float | None:
-    """``--half-life-days N`` を argv から取り出す（未指定なら None）。"""
-    if "--half-life-days" not in argv:
+def _parse_float_flag(argv: list[str], flag: str) -> float | None:
+    """``<flag> N`` を argv から取り出す（未指定なら None）。"""
+    if flag not in argv:
         return None
-    idx = argv.index("--half-life-days")
+    idx = argv.index(flag)
     try:
         return float(argv[idx + 1])
     except (IndexError, ValueError):
+        logger.error(f"{flag} には数値を指定してください（例: {flag} 1095）")
+        sys.exit(1)
+
+
+_DEFAULT_HALF_LIFE_DAYS = 1095.0
+
+
+def _parse_half_life_days(argv: list[str]) -> float | None:
+    """``--half-life-days N`` を argv から取り出す。
+
+    未指定の場合はデフォルト（``_DEFAULT_HALF_LIFE_DAYS``、Optuna チューニングで
+    確認済みの値）を使う。重みなしで学習したい場合は明示的に
+    ``--half-life-days none`` を指定する。
+    """
+    if "--half-life-days" not in argv:
+        return _DEFAULT_HALF_LIFE_DAYS
+    idx = argv.index("--half-life-days")
+    try:
+        value = argv[idx + 1]
+    except IndexError:
         logger.error(
-            "--half-life-days には数値を指定してください（例: --half-life-days 1095）"
+            "--half-life-days には数値または none を指定してください"
+            "（例: --half-life-days 1095 / --half-life-days none）"
         )
         sys.exit(1)
+    if value.lower() == "none":
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        logger.error(
+            "--half-life-days には数値または none を指定してください"
+            "（例: --half-life-days 1095 / --half-life-days none）"
+        )
+        sys.exit(1)
+
+
+# tune コマンドで見つけた LightGBM パラメータを train に渡すためのフラグ。
+# キー名は model.train() の win_params/place_params のキーと一致させる。
+_TUNED_PARAM_FLAGS: dict[str, tuple[str, type]] = {
+    "--num-leaves": ("num_leaves", int),
+    "--learning-rate": ("learning_rate", float),
+    "--min-child-samples": ("min_child_samples", int),
+    "--feature-fraction": ("feature_fraction", float),
+}
+
+
+def _parse_tuned_params(argv: list[str]) -> dict | None:
+    """``tune`` の出力パラメータを渡すフラグを argv から取り出す（未指定なら None）。"""
+    params: dict = {}
+    for flag, (key, cast) in _TUNED_PARAM_FLAGS.items():
+        value = _parse_float_flag(argv, flag)
+        if value is not None:
+            params[key] = cast(value)
+    return params or None
 
 
 def main() -> None:
     if len(sys.argv) < 2:
         logger.error(
             "使い方: python -m predictor.main "
-            "train [--no-walkforward] [--half-life-days N] "
+            "train [--no-walkforward] [--half-life-days N|none] "
             "[--use-embeddings] [--embedding-pca-dim N] "
+            "[--num-leaves N] [--learning-rate F] "
+            "[--min-child-samples N] [--feature-fraction F] "
             "| predict <race_id> | tune [--n-trials N] | compare-half-life "
             "| train-embeddings | similar-embeddings <category> <id> [--top-n N]"
         )
@@ -537,11 +606,13 @@ def main() -> None:
         if "--embedding-pca-dim" in sys.argv:
             idx = sys.argv.index("--embedding-pca-dim")
             embedding_pca_dim = int(sys.argv[idx + 1])
+        tuned_params = _parse_tuned_params(sys.argv)
         train_mode(
             walkforward=walkforward,
             half_life_days=half_life_days,
             use_embeddings=use_embeddings,
             embedding_pca_dim=embedding_pca_dim,
+            tuned_params=tuned_params,
         )
     elif command == "predict":
         if len(sys.argv) < 3:

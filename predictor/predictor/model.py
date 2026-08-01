@@ -17,16 +17,20 @@ from predictor.preprocessing import compute_time_decay_weight, get_feature_colum
 _MODEL_DIR = Path(__file__).parent.parent / "models"
 
 # 複勝モデル用パラメータ（binary classification）
+# num_leaves/learning_rate/min_child_samples/feature_fraction は Optuna チューニング
+# （win_logloss 最小化、trial #23）で見つかった値。標準 train/val/test split での
+# bootstrap CI 検証でも win_accuracy・win_logloss・place_logloss が改善し汎化を確認済み
+# （2026-08-01、詳細は docs/experiments.md 参照）。
 _PARAMS: dict = {
     "objective": "binary",
     "metric": "binary_logloss",
     "verbosity": -1,
-    "learning_rate": 0.05,
-    "num_leaves": 63,
-    "feature_fraction": 0.8,
+    "learning_rate": 0.012807161179774155,
+    "num_leaves": 127,
+    "feature_fraction": 0.5597186764633092,
     "bagging_fraction": 0.8,
     "bagging_freq": 5,
-    "min_child_samples": 20,
+    "min_child_samples": 41,
 }
 
 # 勝ち順位モデル用パラメータ（lambdarank: レース内順位を直接最適化）
@@ -34,12 +38,12 @@ _RANK_PARAMS: dict = {
     "objective": "lambdarank",
     "metric": "ndcg",
     "verbosity": -1,
-    "learning_rate": 0.05,
-    "num_leaves": 63,
-    "feature_fraction": 0.8,
+    "learning_rate": 0.012807161179774155,
+    "num_leaves": 127,
+    "feature_fraction": 0.5597186764633092,
     "bagging_fraction": 0.8,
     "bagging_freq": 5,
-    "min_child_samples": 20,
+    "min_child_samples": 41,
     "ndcg_eval_at": [1, 3, 5],
     # 線形ゲイン: 日本競馬の最大出走頭数 18 頭に対応（デフォルトの指数ゲインより均一に寄与）
     "label_gain": list(range(18)),

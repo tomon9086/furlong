@@ -735,3 +735,34 @@ Embeddingハイブリッドの効果は**未確定**。実装（`embedding.py`, 
 ### Embeddingハイブリッドタスクの最終結論
 
 時間減衰重み付け（タスク1）と同じ構造の結論になった。単一 split の点推定・Log Loss 比較・bootstrap CI の3段階を通じて、**Embeddingハイブリッドが改善するという信頼できる証拠は得られなかった**。実装（`embedding.py`, `embedding_features.py`, `--use-embeddings` フラグ）は非破壊的に追加済みでデフォルトでは無効のため、今後さらに大きな検証予算（walk-forward再検証、embedding_pca_dim の Optuna 探索等）を割く余地は残すが、**現時点ではデフォルト（Embeddingなし）を維持することを推奨する**。
+
+---
+
+## Optuna（win_logloss最小化）チューニング結果の採用検証（2026-08-01）
+
+上記「Bootstrap CI による最終検証（Optuna最良パラメータ vs baseline、2026-07-30）」の失敗を受け、`tuning.py` の目的関数を回収率から `win_logloss`（walk-forward平均、最小化）に変更した（詳細は [spec.md](./spec.md) 時間減衰サンプルウェイト節）。この変更後に `python -m predictor.main tune --n-trials 30`（`n_splits=3`）を実行。
+
+### tune 実行結果
+
+30 trial 中、win_logloss 最良は **trial #23**（`num_leaves=127, learning_rate=0.012807, min_child_samples=41, feature_fraction=0.5597, half_life_days=1095`）で `win_logloss=0.2273`、参考の walk-forward平均回収率は `80.10%`。上位5 trial は回収率 78.4〜80.1% に収束しており、2026-07-30 の回収率直接最適化時のようなfold間の乱高下は見られなかった。
+
+### 標準 train/val/test split での検証
+
+CLI に `--num-leaves`, `--learning-rate`, `--min-child-samples`, `--feature-fraction` フラグを追加（`main.py`）し、trial #23 のパラメータで標準split（学習571,223行/バリデーション76,172行/テスト151,308行）を再学習。2026-07-30 の baseline（重みなし・デフォルトパラメータ）と比較。
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| baseline（重みなし・デフォルトパラメータ、2026-07-30） | 20.37% | 73.06% | 0.2406 | 0.4815 |
+| tuned（trial #23、half_life_days=1095） | **21.27%** | 72.92%（誤差範囲） | **0.2376** | **0.4744** |
+
+walk-forward（5フォールド、`n_splits=5`）平均: win_accuracy=23.33%, recovery_rate=79.87%, win_logloss=0.2266, place_logloss=0.4572。フォールド別の回収率は 70.3%〜85.4%（直近フォールド5が70.3%と最も低く、2026-06-07時点で指摘されていた「近年フォールドの回収率低下」傾向は残っている）。
+
+### 判定
+
+**2026-07-30 とは異なり、標準splitへの汎化に成功した。** win_accuracy・win_logloss・place_logloss がいずれも改善し、悪化した指標はない。回収率のみ 73.06%→72.92% とほぼ横ばい（誤差範囲）で、改善したとは言えないが悪化もしていない。目的関数を分散の大きい回収率から分散の小さい `win_logloss` に変更した設計変更が意図通り機能したことを確認できた。
+
+ただし **回収率そのものは動いていない** ため、110%目標への直接的な寄与はない。今回の結果は「モデルの確率推定精度が上がった」ことの確認であり、「儲かるようになった」ことの確認ではない点に注意。
+
+### 結論・採用
+
+上記検証結果を踏まえ、`model.py` の `_PARAMS`/`_RANK_PARAMS`（`num_leaves=127, learning_rate=0.012807, min_child_samples=41, feature_fraction=0.5597`）と `half_life_days` のデフォルト（`1095`）を採用した。旧デフォルト（`num_leaves=63, learning_rate=0.05, min_child_samples=20, feature_fraction=0.8`、`half_life_days=None`）に戻したい場合は CLI から明示的に上書きできる（`--num-leaves 63 --learning-rate 0.05 --min-child-samples 20 --feature-fraction 0.8 --half-life-days none`）。
