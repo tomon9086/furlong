@@ -28,6 +28,22 @@
 - [ ] 三連単など組合せ爆発が起きる券種は、EV 上位 N 点で打ち切る方針と N の調整方法を spec.md に記録する
 - [ ] 最良の券種・閾値の組合せを [experiments.md](./experiments.md) に記録
 
+## 血統データの遡及補完
+
+> 発端: `dam`（母馬）特徴量の重要度を walk-forward フォールド別に見たところ、2000〜2016年の
+> フォールドでは 0%（一度も使われていない）で、2016年以降のフォールドで急に上位（1〜3位）に
+> 跳ね上がるという不自然な階段状の変化があった。原因を調査したところ `horses.sire`/`dam`/
+> `broodmare_sire` が2016年以前の馬でほぼ空だったことが判明。
+>
+> 原因は2つあった。(1) netkeiba が血統テーブルを馬詳細ページから専用ページ
+> （`/horse/ped/{horse_id}/`）に分離しており、スクレイパーが追従できず新馬でも血統が
+> 欠落し続けていた → **修正済み**（`scraper/scraper/client.py` の `get_horse_pedigree`・
+> `parsers/horse.py` の `parse_pedigree`／`_parse_blood_table`）。(2) 1995〜2006年の馬
+> （約87,000頭）はプロフィールページ自体が未取得のまま → 未着手（下記）。
+
+- [ ] 1995〜2006年の馬（`race_results.horse_id` にはあるが `horses` に存在しない約87,000頭）を `scraper.backfill_missing --horses-only` で遡及スクレイピングする。件数が多く対netkeibaリクエストが長時間・大量になるため、実行タイミング（負荷・レート制限への配慮）を検討してから着手する
+- [ ] 遡及補完後、sire/dam/broodmare_sire の feature importance が古い期間の walk-forward フォールドでも安定するか再確認する
+
 ## predictor HTTP API
 
 - [x] `furlong-predictor` の `pyproject.toml` に `uvicorn` / `fastapi` 依存を追加
