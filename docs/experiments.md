@@ -766,3 +766,79 @@ walk-forward（5フォールド、`n_splits=5`）平均: win_accuracy=23.33%, re
 ### 結論・採用
 
 上記検証結果を踏まえ、`model.py` の `_PARAMS`/`_RANK_PARAMS`（`num_leaves=127, learning_rate=0.012807, min_child_samples=41, feature_fraction=0.5597`）と `half_life_days` のデフォルト（`1095`）を採用した。旧デフォルト（`num_leaves=63, learning_rate=0.05, min_child_samples=20, feature_fraction=0.8`、`half_life_days=None`）に戻したい場合は CLI から明示的に上書きできる（`--num-leaves 63 --learning-rate 0.05 --min-child-samples 20 --feature-fraction 0.8 --half-life-days none`）。
+
+---
+
+## 調教師・騎手の全期間累積勝率フィーチャー追加（2026-08-01）
+
+> 要件定義: [plan/prediction-accuracy-followup.md](./plan/prediction-accuracy-followup.md) 「特徴量要件定義：調教師・騎手の『通算』勝率」節
+
+`analysis/notebooks/03_recovery_rate_by_condition.ipynb` 軸10・12（調教師24.3pt差・騎手16.6pt差、循環性チェック済み）を特徴量化。既存の `trainer_win_rate_last30`（直近30走）・`jockey_win_rate_venue_cond`（venue×course_type限定）とは別軸として、**デビューからそのレース直前までの全期間累積勝率**を4カラム追加した（`trainer_prior_win_rate`, `trainer_prior_mounts`, `jockey_prior_win_rate`, `jockey_prior_mounts`）。tier化はせず連続値のまま渡す。同日複数レースの前後関係リークを避けるため、日付単位で集計してから当日分を除く方式（ノートブックの `compute_prior_stats` と同じロジック）。
+
+### 標準 train/val/test split での比較
+
+直前の Optuna 採用パラメータ（`half_life_days=1095`、tuned params）をベースラインとし、特徴量追加のみを変更点として比較。
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| ベースライン（特徴量追加前、上記2026-08-01採用時点） | 21.27% | 72.92% | 0.2376 | 0.4744 |
+| 調教師・騎手の全期間累積勝率を追加 | 21.50%（+0.23pt） | 72.45%（-0.47pt、誤差範囲） | **0.2369**（改善） | **0.4730**（改善） |
+
+### Walk-forward（5フォールド、n_splits=5）平均での比較
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| ベースライン | 23.33% | 79.87% | 0.2266 | 0.4572 |
+| 追加後 | 23.45%（+0.12pt） | **80.63%（+0.76pt）** | 0.2264（僅かに改善） | 0.4571（僅かに改善） |
+
+フォールド別回収率: 81.6% / 83.6% / 82.6% / 82.1% / 73.2%（直近フォールド5が最も低いのは従来と同じ傾向）。
+
+### Feature importance（gain, win モデル）
+
+`jockey_prior_win_rate` は全53特徴量中 **9位**（寄与3.61%）で、既存の `jockey_win_rate_venue_cond`（10位, 3.08%）を上回った。`trainer_prior_win_rate` は22位（0.58%）で、既存の `trainer_win_rate_last30`（43位, 0.08%）よりはるかに高い寄与を示した。**調教師については「直近30走」より「全期間累積」の方がモデルにとって有用な情報を持っている**ことが示唆される。`*_prior_mounts`（累積騎乗数）自体の寄与は小さい（27〜33位）。
+
+### 判定
+
+win_logloss・place_logloss・walk-forward recovery_rate は一貫して改善（悪化した指標なし）。標準splitのrecovery_rateのみ僅かに悪化しているが、このプロジェクトで繰り返し確認済みの通り回収率は分散が大きい指標であり、walk-forward平均では逆に改善しているため誤差範囲と判断するのが妥当。**騎手の全期間累積勝率は既存のvenue×course_type限定版より重要度が高く、明確に採用価値がある。** 調教師側も既存の直近30走版より寄与が大きく、置き換えではなく併存させる設計（要件定義通り）が有効だったことを示す結果。
+
+### 結論・採用
+
+4カラム（`trainer_prior_win_rate`, `trainer_prior_mounts`, `jockey_prior_win_rate`, `jockey_prior_mounts`）を `get_feature_columns()` に採用済み（非破壊的追加、既存特徴量は変更なし）。より大きな検証予算をかけたbootstrap CIでの標準split単勝top1回収率の有意差検証は未実施で、次の余地として残る。
+
+---
+
+## 馬主の全期間累積勝率フィーチャー追加（2026-08-01）
+
+> 要件定義: [plan/prediction-accuracy-followup.md](./plan/prediction-accuracy-followup.md) 「特徴量要件定義：調教師・騎手・馬主の『通算』勝率」節の「馬主の歪み（軸14）」
+
+`analysis/notebooks/03_recovery_rate_by_condition.ipynb` 軸14（馬主15.3pt差、循環性チェック済み）を特徴量化。上記の調教師・騎手の全期間累積勝率に続く3つ目のエンティティとして、`owner_prior_win_rate`, `owner_prior_mounts` の2カラムを追加した（エンティティキーは `horses.owner_id` ではなく入力率99.9%の `race_results.owner` 文字列）。ロジック・リーク防止方式は調教師・騎手と同一（`compute_recent_stats` に owner_daily ブロックを追加、日付単位で集計してから1日分ずらす）。
+
+### 標準 train/val/test split での比較
+
+直前の状態（調教師・騎手の全期間累積勝率まで採用済み）をベースラインとし、馬主特徴量の追加のみを変更点として比較。
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| ベースライン（調教師・騎手まで採用時点） | 21.50% | 72.45% | 0.2369 | 0.4730 |
+| 馬主の全期間累積勝率を追加 | 21.96%（+0.46pt） | 72.44%（-0.01pt、誤差範囲） | **0.2365**（改善） | **0.4725**（改善） |
+
+### Walk-forward（5フォールド、n_splits=5）平均での比較
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| ベースライン | 23.33% | 79.87% | 0.2266 | 0.4572 |
+| 追加後 | 23.41%（+0.08pt） | 79.64%（-0.23pt、誤差範囲） | **0.2261**（改善） | **0.4565**（改善） |
+
+フォールド別回収率: 79.8% / 82.9% / 82.9% / 82.5% / 70.1%（直近フォールド5が最も低いのは従来と同じ傾向。フォールド5のみ従来の73.2%から70.1%へやや低下しているが、他4フォールドは概ね横ばい〜改善）。
+
+### Feature importance（gain, win モデル）
+
+`owner_prior_win_rate` は全55特徴量中 **17位**（寄与0.68%）で、`trainer_prior_win_rate`（23位, 0.51%）を上回った。要件定義で懸念していた「調教師との多重共線性でどちらかが潰れる」という事態は今回は起きておらず、両方とも独立に一定の寄与を保っている（trainer_prior_win_rateは前回検証時の22位・0.58%からわずかに順位を落としたのみ）。`owner_prior_mounts` 自体の寄与は小さい（37位, 0.15%）。
+
+### 判定
+
+win_logloss・place_loglossは標準split・walk-forwardの両方で一貫して改善（悪化した指標なし）。recovery_rateはどちらも誤差範囲内の変動で、これまでの特徴量追加と同じパターン。**馬主の全期間累積勝率は独立した寄与を持ち、採用価値がある。**
+
+### 結論・採用
+
+2カラム（`owner_prior_win_rate`, `owner_prior_mounts`）を `get_feature_columns()` に採用済み（非破壊的追加）。これで軸10・12・14（調教師・騎手・馬主）の3つのエンティティ通算勝率が出揃った。bootstrap CIでの有意差検証は引き続き未実施。

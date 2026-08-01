@@ -135,6 +135,7 @@ def _make_multi_race_raw_df() -> pd.DataFrame:
                     "horse_weight": "480",
                     "horse_weight_diff": "0",
                     "trainer_id": f"T{horse_idx}",
+                    "owner": f"O{horse_idx}",
                     "sire": "Sire",
                     "dam": "Dam",
                     "broodmare_sire": "BMS",
@@ -287,6 +288,72 @@ class TestComputeRecentStats:
         result = compute_recent_stats(df)
         h0_r1 = result[(result["horse_id"] == "H0") & (result["race_id"] == "R1")]
         assert h0_r1["course_type_change"].iloc[0] == pytest.approx(1.0)
+
+    def test_trainer_prior_win_rate_first_race_is_nan(self):
+        """調教師の1走目は全期間累積勝率が NaN になること（過去騎乗数0）。"""
+        df = preprocess(_make_multi_race_raw_df())
+        result = compute_recent_stats(df)
+        first_races = result[result["race_id"] == "R0"]
+        assert first_races["trainer_prior_win_rate"].isna().all()
+        assert (first_races["trainer_prior_mounts"] == 0.0).all()
+
+    def test_trainer_prior_win_rate_accumulates_across_all_history(self):
+        """調教師の全期間累積勝率は、直近30走に限らず過去全レースを使うこと。"""
+        df = preprocess(_make_multi_race_raw_df())
+        result = compute_recent_stats(df)
+        # T0（H0の調教師）は全レースで1着なので、R4時点の累積勝率は1.0、累積騎乗数は4
+        h0_r4 = result[(result["horse_id"] == "H0") & (result["race_id"] == "R4")]
+        assert h0_r4["trainer_prior_win_rate"].iloc[0] == pytest.approx(1.0)
+        assert h0_r4["trainer_prior_mounts"].iloc[0] == pytest.approx(4.0)
+
+    def test_jockey_prior_win_rate_first_race_is_nan(self):
+        """騎手の1走目は全期間累積勝率が NaN になること（過去騎乗数0）。"""
+        df = preprocess(_make_multi_race_raw_df())
+        result = compute_recent_stats(df)
+        first_races = result[result["race_id"] == "R0"]
+        assert first_races["jockey_prior_win_rate"].isna().all()
+        assert (first_races["jockey_prior_mounts"] == 0.0).all()
+
+    def test_jockey_prior_win_rate_accumulates_across_all_history(self):
+        """騎手の全期間累積勝率は、venue×course_type に絞らず過去全レースを使うこと。"""
+        df = preprocess(_make_multi_race_raw_df())
+        result = compute_recent_stats(df)
+        # J0（H0の騎手）は全レースで1着なので、R4時点の累積勝率は1.0、累積騎乗数は4
+        h0_r4 = result[(result["horse_id"] == "H0") & (result["race_id"] == "R4")]
+        assert h0_r4["jockey_prior_win_rate"].iloc[0] == pytest.approx(1.0)
+        assert h0_r4["jockey_prior_mounts"].iloc[0] == pytest.approx(4.0)
+
+    def test_prior_win_rate_same_day_races_excluded(self):
+        """同日の複数レースは、互いの結果を「前情報」として使わないこと。"""
+        raw = _make_multi_race_raw_df()
+        # H0 の R1 を R0 と同じ日付にする（同日2レース目という扱い）
+        raw.loc[raw["race_id"] == "R1", "date"] = raw.loc[
+            raw["race_id"] == "R0", "date"
+        ].iloc[0]
+        df = preprocess(raw)
+        result = compute_recent_stats(df)
+        h0_r1 = result[(result["horse_id"] == "H0") & (result["race_id"] == "R1")]
+        # R0 と同日なので、R0 の結果はまだ「前情報」に含まれない
+        assert h0_r1["trainer_prior_mounts"].iloc[0] == pytest.approx(0.0)
+        assert h0_r1["jockey_prior_mounts"].iloc[0] == pytest.approx(0.0)
+        assert h0_r1["owner_prior_mounts"].iloc[0] == pytest.approx(0.0)
+
+    def test_owner_prior_win_rate_first_race_is_nan(self):
+        """馬主の1走目は全期間累積勝率が NaN になること（過去騎乗数0）。"""
+        df = preprocess(_make_multi_race_raw_df())
+        result = compute_recent_stats(df)
+        first_races = result[result["race_id"] == "R0"]
+        assert first_races["owner_prior_win_rate"].isna().all()
+        assert (first_races["owner_prior_mounts"] == 0.0).all()
+
+    def test_owner_prior_win_rate_accumulates_across_all_history(self):
+        """馬主の全期間累積勝率は、過去全レースを使うこと。"""
+        df = preprocess(_make_multi_race_raw_df())
+        result = compute_recent_stats(df)
+        # O0（H0の馬主）は全レースで1着なので、R4時点の累積勝率は1.0、累積騎乗数は4
+        h0_r4 = result[(result["horse_id"] == "H0") & (result["race_id"] == "R4")]
+        assert h0_r4["owner_prior_win_rate"].iloc[0] == pytest.approx(1.0)
+        assert h0_r4["owner_prior_mounts"].iloc[0] == pytest.approx(4.0)
 
 
 # ──────────────────────────────────────────────

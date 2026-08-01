@@ -44,6 +44,7 @@ _SELECT_COLS = """
     rr.horse_weight,
     rr.horse_weight_diff,
     rr.trainer_id,
+    rr.owner,
     h.sire,
     h.dam,
     h.broodmare_sire"""
@@ -219,6 +220,48 @@ WHERE rn <= 30
 GROUP BY trainer_id
 """
 
+_TRAINER_PRIOR_WIN_RATE_QUERY = """
+SELECT
+  trainer_id,
+  SUM(CASE WHEN finishing_position::integer = 1 THEN 1 ELSE 0 END)::float
+    / NULLIF(COUNT(*), 0) AS trainer_prior_win_rate,
+  COUNT(*)::float AS trainer_prior_mounts
+FROM race_results rr
+JOIN races r ON rr.race_id = r.race_id
+WHERE rr.finishing_position ~ '^[0-9]+$'
+  AND rr.trainer_id = ANY(%s)
+  AND TO_DATE(r.date, 'YYYY/MM/DD') < TO_DATE(%s, 'YYYY/MM/DD')
+GROUP BY trainer_id
+"""
+
+_JOCKEY_PRIOR_WIN_RATE_QUERY = """
+SELECT
+  jockey_id,
+  SUM(CASE WHEN finishing_position::integer = 1 THEN 1 ELSE 0 END)::float
+    / NULLIF(COUNT(*), 0) AS jockey_prior_win_rate,
+  COUNT(*)::float AS jockey_prior_mounts
+FROM race_results rr
+JOIN races r ON rr.race_id = r.race_id
+WHERE rr.finishing_position ~ '^[0-9]+$'
+  AND rr.jockey_id = ANY(%s)
+  AND TO_DATE(r.date, 'YYYY/MM/DD') < TO_DATE(%s, 'YYYY/MM/DD')
+GROUP BY jockey_id
+"""
+
+_OWNER_PRIOR_WIN_RATE_QUERY = """
+SELECT
+  owner,
+  SUM(CASE WHEN finishing_position::integer = 1 THEN 1 ELSE 0 END)::float
+    / NULLIF(COUNT(*), 0) AS owner_prior_win_rate,
+  COUNT(*)::float AS owner_prior_mounts
+FROM race_results rr
+JOIN races r ON rr.race_id = r.race_id
+WHERE rr.finishing_position ~ '^[0-9]+$'
+  AND rr.owner = ANY(%s)
+  AND TO_DATE(r.date, 'YYYY/MM/DD') < TO_DATE(%s, 'YYYY/MM/DD')
+GROUP BY owner
+"""
+
 _PAYOFFS_QUERY = """
 SELECT race_id, bet_type, combination, payout
 FROM payoffs
@@ -296,9 +339,11 @@ def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
             horse_ids = target_df["horse_id"].dropna().tolist()
             jockey_ids = target_df["jockey_id"].dropna().tolist()
             trainer_ids = target_df["trainer_id"].dropna().tolist()
+            owners = target_df["owner"].dropna().tolist()
             venue = target_df["venue"].iloc[0]
             course_type = target_df["course_type"].iloc[0]
             distance = int(target_df["distance"].iloc[0])
+            race_date = target_df["date"].iloc[0]
 
             cur.execute(_RECENT_STATS_QUERY, (horse_ids, course_type, distance))
             stats_rows = cur.fetchall()
@@ -315,6 +360,21 @@ def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
             trainer_cols = [desc[0] for desc in cur.description]
             trainer_df = pd.DataFrame(trainer_rows, columns=trainer_cols)
 
+            cur.execute(_TRAINER_PRIOR_WIN_RATE_QUERY, (trainer_ids, race_date))
+            trainer_prior_rows = cur.fetchall()
+            trainer_prior_cols = [desc[0] for desc in cur.description]
+            trainer_prior_df = pd.DataFrame(trainer_prior_rows, columns=trainer_prior_cols)
+
+            cur.execute(_JOCKEY_PRIOR_WIN_RATE_QUERY, (jockey_ids, race_date))
+            jockey_prior_rows = cur.fetchall()
+            jockey_prior_cols = [desc[0] for desc in cur.description]
+            jockey_prior_df = pd.DataFrame(jockey_prior_rows, columns=jockey_prior_cols)
+
+            cur.execute(_OWNER_PRIOR_WIN_RATE_QUERY, (owners, race_date))
+            owner_prior_rows = cur.fetchall()
+            owner_prior_cols = [desc[0] for desc in cur.description]
+            owner_prior_df = pd.DataFrame(owner_prior_rows, columns=owner_prior_cols)
+
             cur.execute(_PRE_RACE_ODDS_QUERY, (race_id,))
             pre_odds_rows = cur.fetchall()
             pre_odds_cols = [desc[0] for desc in cur.description]
@@ -330,6 +390,9 @@ def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
         target_df.merge(stats_df, on="horse_id", how="left")
         .merge(jockey_df, on="jockey_id", how="left")
         .merge(trainer_df, on="trainer_id", how="left")
+        .merge(trainer_prior_df, on="trainer_id", how="left")
+        .merge(jockey_prior_df, on="jockey_id", how="left")
+        .merge(owner_prior_df, on="owner", how="left")
         .merge(pre_odds_df, on="horse_number", how="left")
         .merge(bracket_df, on="bracket_number", how="left")
     )
@@ -445,6 +508,12 @@ def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFra
         "avg_last3f_rank_last5_cond",
         "jockey_win_rate_venue_cond",
         "trainer_win_rate_last30",
+        "trainer_prior_win_rate",
+        "trainer_prior_mounts",
+        "jockey_prior_win_rate",
+        "jockey_prior_mounts",
+        "owner_prior_win_rate",
+        "owner_prior_mounts",
         "bracket_distance_avg_finish",
     ):
         if col in df.columns:
@@ -663,6 +732,82 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
     df_trainer = df_trainer.drop(columns=["_trainer_is_win_s"])
     df["trainer_win_rate_last30"] = df_trainer["trainer_win_rate_last30"]
 
+    # ── 調教師: 全期間累積勝率（デビューからそのレース直前まで） ────────────────
+    # 同日の複数レースの前後関係は分からないため、日付単位で集計してから
+    # 当日分を除く（＝1日分ずらす）ことでリークを防ぐ。
+    trainer_daily = (
+        df.groupby(["trainer_id", "date"], observed=True)["is_win"]
+        .agg(_daily_mounts="count", _daily_wins="sum")
+        .reset_index()
+        .sort_values(["trainer_id", "date"])
+    )
+    _grp_trainer_daily = trainer_daily.groupby("trainer_id", observed=True)
+    trainer_daily["trainer_prior_mounts"] = (
+        _grp_trainer_daily["_daily_mounts"].cumsum() - trainer_daily["_daily_mounts"]
+    ).astype(float)
+    _trainer_prior_wins = (
+        _grp_trainer_daily["_daily_wins"].cumsum() - trainer_daily["_daily_wins"]
+    ).astype(float)
+    trainer_daily["trainer_prior_win_rate"] = _trainer_prior_wins / trainer_daily[
+        "trainer_prior_mounts"
+    ].replace(0, float("nan"))
+    df = df.merge(
+        trainer_daily[
+            ["trainer_id", "date", "trainer_prior_win_rate", "trainer_prior_mounts"]
+        ],
+        on=["trainer_id", "date"],
+        how="left",
+    )
+
+    # ── 騎手: 全期間累積勝率（デビューからそのレース直前まで） ──────────────────
+    jockey_daily = (
+        df.groupby(["jockey_id", "date"], observed=True)["is_win"]
+        .agg(_daily_mounts="count", _daily_wins="sum")
+        .reset_index()
+        .sort_values(["jockey_id", "date"])
+    )
+    _grp_jockey_daily = jockey_daily.groupby("jockey_id", observed=True)
+    jockey_daily["jockey_prior_mounts"] = (
+        _grp_jockey_daily["_daily_mounts"].cumsum() - jockey_daily["_daily_mounts"]
+    ).astype(float)
+    _jockey_prior_wins = (
+        _grp_jockey_daily["_daily_wins"].cumsum() - jockey_daily["_daily_wins"]
+    ).astype(float)
+    jockey_daily["jockey_prior_win_rate"] = _jockey_prior_wins / jockey_daily[
+        "jockey_prior_mounts"
+    ].replace(0, float("nan"))
+    df = df.merge(
+        jockey_daily[
+            ["jockey_id", "date", "jockey_prior_win_rate", "jockey_prior_mounts"]
+        ],
+        on=["jockey_id", "date"],
+        how="left",
+    )
+
+    # ── 馬主: 全期間累積勝率（デビューからそのレース直前まで） ──────────────────
+    # horses.owner_id は入力率が低いため、race_results.owner（文字列）をキーにする。
+    owner_daily = (
+        df.groupby(["owner", "date"], observed=True)["is_win"]
+        .agg(_daily_mounts="count", _daily_wins="sum")
+        .reset_index()
+        .sort_values(["owner", "date"])
+    )
+    _grp_owner_daily = owner_daily.groupby("owner", observed=True)
+    owner_daily["owner_prior_mounts"] = (
+        _grp_owner_daily["_daily_mounts"].cumsum() - owner_daily["_daily_mounts"]
+    ).astype(float)
+    _owner_prior_wins = (
+        _grp_owner_daily["_daily_wins"].cumsum() - owner_daily["_daily_wins"]
+    ).astype(float)
+    owner_daily["owner_prior_win_rate"] = _owner_prior_wins / owner_daily[
+        "owner_prior_mounts"
+    ].replace(0, float("nan"))
+    df = df.merge(
+        owner_daily[["owner", "date", "owner_prior_win_rate", "owner_prior_mounts"]],
+        on=["owner", "date"],
+        how="left",
+    )
+
     # ── 枠番 × 距離帯: 累積平均着順 ────────────────────────────────────────
     df["_distance_band"] = pd.cut(
         pd.to_numeric(df["distance"], errors="coerce"),
@@ -789,8 +934,15 @@ def get_feature_columns(extra_columns: list[str] | None = None) -> list[str]:
         "broodmare_sire",
         # 騎手統計
         "jockey_win_rate_venue_cond",
+        "jockey_prior_win_rate",
+        "jockey_prior_mounts",
         # 調教師統計
         "trainer_win_rate_last30",
+        "trainer_prior_win_rate",
+        "trainer_prior_mounts",
+        # 馬主統計
+        "owner_prior_win_rate",
+        "owner_prior_mounts",
         # 騎手・調教師
         "jockey_id",
         "trainer_id",

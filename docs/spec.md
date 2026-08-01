@@ -254,10 +254,13 @@ furlong/
 | 上がり3ハロン相対順位（全レース） | `avg_last3f_rank_last3`, `avg_last3f_rank_last5` |
 | 上がり3ハロン相対順位（同コース種別・同距離） | `avg_last3f_rank_last3_cond`, `avg_last3f_rank_last5_cond` |
 | 血統 | `sire`, `dam`, `broodmare_sire` |
-| 騎手統計 | `jockey_win_rate_venue_cond`（場・コース種別の勝率） |
-| 調教師統計 | `trainer_win_rate_last30`（直近成績の勝率） |
+| 騎手統計 | `jockey_win_rate_venue_cond`（場・コース種別の勝率）, `jockey_prior_win_rate`, `jockey_prior_mounts`（デビューからそのレース直前までの全期間累積勝率・累積騎乗数） |
+| 調教師統計 | `trainer_win_rate_last30`（直近30走の勝率）, `trainer_prior_win_rate`, `trainer_prior_mounts`（全期間累積勝率・累積騎乗数） |
+| 馬主統計 | `owner_prior_win_rate`, `owner_prior_mounts`（全期間累積勝率・累積騎乗数。エンティティキーは `race_results.owner` の文字列） |
 | 騎手・調教師 | `jockey_id`, `trainer_id` |
 | 枠番×距離帯 | `bracket_distance_avg_finish`（枠番×距離帯の平均着順） |
+
+> **全期間累積勝率系（`*_prior_win_rate`, `*_prior_mounts`）の共通ロジック**: 日付単位で騎乗数・勝利数を集計してから1日分ずらして累積することで、当該レース自身は集計から除外する（同日複数レースの前後関係は不明なため）。既存の直近30走・venue×course_type限定版とは別軸として併存させる（置き換えではない）。検証結果は [experiments.md](./experiments.md) 参照（調教師・騎手は2026-08-01採用、馬主は同日追加採用）。
 
 > **市場オッズ（`odds`, `popularity`）は学習特徴量から除外。** 確定オッズを含めると「市場オッズの模倣」になり控除率分の損失が上限となるため。事前オッズ（`pre_race_odds.win_odds`）は EV 計算にのみ使用する。
 
