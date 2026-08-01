@@ -527,6 +527,36 @@ def compare_half_life_mode() -> None:
     logger.info(f"結果を保存しました: {path}")
 
 
+def compare_longshot_mode() -> None:
+    """7番人気以下専用モデル（学習行を人気で絞る）とbaselineを比較し、結果をCSVに保存する。"""
+    from predictor import longshot_experiment
+    from predictor.preprocessing import (
+        compute_recent_stats,
+        load_data,
+        preprocess,
+        split_by_date,
+    )
+
+    logger.info("データを読み込み中...")
+    raw = load_data(DATABASE_URL)
+    df = preprocess(raw)
+
+    logger.info("近走成績フィーチャーを計算中...")
+    df = compute_recent_stats(df)
+
+    logger.info("時系列分割中...")
+    train_df, val_df, test_df = split_by_date(df)
+
+    logger.info("longshot専用モデル比較実験を実行中...")
+    result = longshot_experiment.run_comparison(train_df, val_df, test_df)
+
+    logger.info("--- 7番人気以下 win_logloss / win_brier 比較結果 ---")
+    logger.info(result.to_string())
+
+    path = longshot_experiment.save_comparison(result)
+    logger.info(f"結果を保存しました: {path}")
+
+
 def train_embeddings_mode() -> None:
     """騎手ID・調教師ID・血統IDの Embedding を PyTorch で学習し保存する。
 
@@ -660,6 +690,7 @@ def main() -> None:
             "[--num-leaves N] [--learning-rate F] "
             "[--min-child-samples N] [--feature-fraction F] "
             "| predict <race_id> | tune [--n-trials N] | compare-half-life "
+            "| compare-longshot-training "
             "| train-embeddings | similar-embeddings <category> <id> [--top-n N]"
         )
         sys.exit(1)
@@ -695,6 +726,8 @@ def main() -> None:
         tune_mode(n_trials=n_trials)
     elif command == "compare-half-life":
         compare_half_life_mode()
+    elif command == "compare-longshot-training":
+        compare_longshot_mode()
     elif command == "train-embeddings":
         train_embeddings_mode()
     elif command == "similar-embeddings":
