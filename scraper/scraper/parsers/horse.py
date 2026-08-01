@@ -68,29 +68,40 @@ class HorseParser(BaseParser):
         return profile
 
     def _parse_blood_table(self, table) -> dict[str, str]:
-        """血統テーブル（父・母・母父）をパースする."""
-        blood: dict[str, str] = {}
-        sire_dam_cells = []
-        grandsire_cells = []
+        """血統テーブル（父・母・母父）をパースする.
 
-        for tr in table.find_all("tr"):
-            for td in tr.find_all("td"):
-                if td.get("rowspan"):
-                    sire_dam_cells.append(td)
-                else:
-                    grandsire_cells.append(td)
+        セルの「開始行インデックス」と rowspan（省略時1）から世代を機械的に特定する。
+        表全体で最大の rowspan を持つセルが1世代目（父＝開始行0、母＝開始行=最大rowspan）。
+        母父は母と同じ開始行で rowspan が母の半分のセル。
+        3代表・5代表など血統表の世代の深さが変わっても同じロジックで動く
+        （netkeiba の血統ページは3代分・5代分などレイアウトが揺れるため）。
+        """
 
         def _text(cell) -> str:
             a = cell.find("a")
             return a.get_text(strip=True) if a else cell.get_text(strip=True)
 
-        if len(sire_dam_cells) >= 1:
-            blood["父"] = _text(sire_dam_cells[0])
-        if len(sire_dam_cells) >= 2:
-            blood["母"] = _text(sire_dam_cells[1])
-        # grandsire_cells: [父父, 父母, 母父, 母母]
-        if len(grandsire_cells) >= 3:
-            blood["母父"] = _text(grandsire_cells[2])
+        cells: list[tuple[int, int, str]] = []
+        row_idx = 0
+        for tr in table.find_all("tr"):
+            for td in tr.find_all("td"):
+                rowspan = int(td.get("rowspan", 1))
+                cells.append((row_idx, rowspan, _text(td)))
+            row_idx += 1
+
+        if not cells:
+            return {}
+
+        max_rowspan = max(span for _, span, _ in cells)
+
+        blood: dict[str, str] = {}
+        for start, span, text in cells:
+            if span == max_rowspan and start == 0:
+                blood["父"] = text
+            elif span == max_rowspan and start == max_rowspan:
+                blood["母"] = text
+            elif span == max_rowspan // 2 and start == max_rowspan:
+                blood["母父"] = text
 
         return blood
 
@@ -151,26 +162,15 @@ class HorseParser(BaseParser):
 
         return results
 
-    def parse_pedigree_json(self, json_text: str) -> dict[str, str]:
-        """AJAX 血統レスポンス (JSON) から血統情報を抽出する.
+    def parse_pedigree(self, html: str) -> dict[str, str]:
+        """血統ページ (/horse/ped/{horse_id}/) のHTMLから血統情報を抽出する.
 
-        netkeiba の馬ページでは血統テーブルが AJAX で読み込まれる。
-        レスポンス形式: {"status": "OK", "data": "<table class='blood_table'>..."}
+        馬詳細ページ (/horse/{horse_id}/) には血統テーブルが含まれなくなったため
+        （2026年頃の netkeiba 仕様変更）、専用の血統ページを別途取得してパースする。
         """
-        import json as _json
-
-        try:
-            obj = _json.loads(json_text)
-        except (ValueError, TypeError):
-            logger.warning("血統 JSON のパース失敗")
-            return {}
-
-        html = obj.get("data", "")
-        if not html:
-            return {}
-
         soup = self.parse_html(html)
         blood_table = soup.find("table", class_="blood_table")
         if not blood_table:
+            logger.debug("血統テーブルが見つかりません")
             return {}
         return self._parse_blood_table(blood_table)

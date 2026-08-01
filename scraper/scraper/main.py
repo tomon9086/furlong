@@ -62,15 +62,30 @@ def scrape_odds(race_id: str) -> None:
     db.save_pre_race_odds(race_id, rows)
 
 
+def _fetch_horse_profile(
+    client: "NetkeibaClient", parser: "HorseParser", horse_id: str
+) -> tuple[dict, list]:
+    """馬のプロフィール・競走成績・血統をまとめて取得する.
+
+    血統テーブルは馬詳細ページ (/horse/{horse_id}/) には含まれなくなった
+    （2026年頃の netkeiba 仕様変更）ため、専用の血統ページを別途取得して merge する。
+    """
+    html = client.get_horse(horse_id)
+    profile, race_results = parser.parse(html)
+
+    pedigree_html = client.get_horse_pedigree(horse_id)
+    profile.update(parser.parse_pedigree(pedigree_html))  # type: ignore[arg-type]
+
+    return profile, race_results
+
+
 def scrape_horse(horse_id: str) -> None:
     """指定馬IDの馬ページをスクレイピングして DB に保存する."""
     parser = HorseParser()
 
     with NetkeibaClient() as client:
         logger.info("馬 %s を取得中...", horse_id)
-        html = client.get_horse(horse_id)
-
-    profile, _ = parser.parse(html)
+        profile, _ = _fetch_horse_profile(client, parser, horse_id)
 
     db = Database(DATABASE_URL)
     db.save_horse(horse_id, profile)
@@ -129,8 +144,7 @@ def _supplement_horses(
     horse_parser = HorseParser()
     for horse_id in missing_horse_ids:
         try:
-            html = client.get_horse(horse_id)
-            profile, _ = horse_parser.parse(html)
+            profile, _ = _fetch_horse_profile(client, horse_parser, horse_id)
             db.save_horse(horse_id, profile)
         except Exception:
             logger.exception("馬 %s の取得に失敗しました。スキップします。", horse_id)
@@ -224,8 +238,7 @@ def scrape_shutuba(race_id: str) -> None:
             horse_parser = HorseParser()
             for horse_id in missing_horse_ids:
                 try:
-                    horse_html = client.get_horse(horse_id)
-                    profile, _ = horse_parser.parse(horse_html)
+                    profile, _ = _fetch_horse_profile(client, horse_parser, horse_id)
                     db.save_horse(horse_id, profile)
                 except Exception:
                     logger.exception(

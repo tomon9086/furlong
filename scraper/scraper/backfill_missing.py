@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 
 from repository import Database
 from .client import NetkeibaClient
+from .main import _fetch_horse_profile
 from .parsers import HorseParser, JockeyParser, RaceDetailParser, ShutsubaParser, TrainerParser
 
 load_dotenv()
@@ -130,8 +131,7 @@ def backfill_horses(
     for i, horse_id in enumerate(horse_ids, start=1):
         logger.info("[馬 %d/%d] %s を取得中...", i, len(horse_ids), horse_id)
         try:
-            html = client.get_horse(horse_id)
-            profile, _ = parser.parse(html)
+            profile, _ = _fetch_horse_profile(client, parser, horse_id)
             db.save_horse(horse_id, profile)
             ok += 1
         except Exception:

@@ -65,6 +65,16 @@ class NetkeibaClient:
         url = f"{_BASE_URL}/horse/{horse_id}/"
         return self._get(url)
 
+    def get_horse_pedigree(self, horse_id: str) -> str:
+        """馬の血統ページを取得してHTMLを返す.
+
+        血統テーブル（血統表）は馬詳細ページ (/horse/{horse_id}/) には含まれず、
+        専用ページ (/horse/ped/{horse_id}/) に server-rendered HTML として存在する
+        （2026年頃の netkeiba 仕様変更で分離された）。
+        """
+        url = f"{_BASE_URL}/horse/ped/{horse_id}/"
+        return self._get(url)
+
     def get_jockey(self, jockey_id: str) -> str:
         """騎手プロフィールページを取得してHTMLを返す."""
         url = f"{_BASE_URL}/jockey/profile/{jockey_id}/"
