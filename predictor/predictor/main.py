@@ -20,9 +20,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# EV≥1.5〜2.0 付近（2-3番人気×ワイドの有望ゾーン）を細かく見るための閾値グリッド。
+# 馬連・三連複・ワイド共通で使う（デフォルトの5段階グリッドより粒度が細かい）。
+_FINE_EV_THRESHOLDS = [round(1.0 + 0.1 * i, 1) for i in range(16)]  # 1.0, 1.1, ..., 2.5
+
+
 def _run_wf_fold(args: tuple) -> dict:
     """Walk-forward の1フォールドを実行するヘルパー（ProcessPoolExecutor 並列実行用）。"""
-    fold_idx, wf_train, wf_test, half_life_days, tuned_params = args
+    fold_idx, wf_train, wf_test, half_life_days, tuned_params, wf_payoffs = args
+    import pandas as pd
+
     from predictor import calibration as _calib_mod
     from predictor import evaluation
     from predictor import model as _model
@@ -36,6 +43,18 @@ def _run_wf_fold(args: tuple) -> dict:
     wf_calibrated = _calib_mod.calibrate_models(wf_models, wf_test)
     wf_pred = _model.predict(wf_calibrated, wf_test)
     wf_metrics = evaluation.evaluate(wf_test, wf_pred)
+
+    fold_payoffs = wf_payoffs[wf_payoffs["race_id"].isin(wf_test["race_id"])]
+    bet_record_frames = []
+    for bet_type in ("馬連", "三連複", "ワイド"):
+        records = evaluation.ev_bet_records(
+            wf_test, wf_pred, fold_payoffs, bet_type, thresholds=_FINE_EV_THRESHOLDS
+        )
+        records["bet_type"] = bet_type
+        records["fold"] = fold_idx
+        bet_record_frames.append(records)
+    bet_records = pd.concat(bet_record_frames, ignore_index=True)
+
     return {
         "fold": fold_idx,
         "train_rows": len(wf_train),
@@ -43,6 +62,7 @@ def _run_wf_fold(args: tuple) -> dict:
         "test_start": wf_test["date"].min(),
         "test_end": wf_test["date"].max(),
         **wf_metrics,
+        "_bet_records": bet_records,
     }
 
 
@@ -274,6 +294,23 @@ def train_mode(
     else:
         logger.info("  データなし")
 
+    logger.info("--- 三連複 Bootstrap 信頼区間（EV閘値 × 人気帯, 95%CI）---")
+    trio_ci = evaluation.ev_trio_bootstrap_ci(
+        test_df, pred_df, payoffs_df, random_state=42
+    )
+    if not trio_ci.empty:
+        logger.info(trio_ci.to_string())
+    else:
+        logger.info("  データなし")
+
+    logger.info("--- ワイド Bootstrap 信頼区間（EV閘値 × 人気帯, 95%CI）---")
+    wide_records = evaluation.ev_bet_records(test_df, pred_df, payoffs_df, "ワイド")
+    wide_ci = evaluation.pooled_bootstrap_ci(wide_records, random_state=42)
+    if not wide_ci.empty:
+        logger.info(wide_ci.to_string())
+    else:
+        logger.info("  データなし")
+
     logger.info("--- キャリブレーションカーブ（単勝・較正後）---")
     logger.info(calib_after["win"].to_string(index=False))
     logger.info("--- キャリブレーションカーブ（複勝・較正後）---")
@@ -286,8 +323,19 @@ def train_mode(
         from predictor.preprocessing import walk_forward_splits
 
         wf_splits = walk_forward_splits(df, n_splits=5)
+
+        wf_test_race_ids = sorted(
+            {
+                rid
+                for _, wf_test in wf_splits
+                for rid in wf_test["race_id"].unique().tolist()
+            }
+        )
+        logger.info(f"  walk-forward 払戻データを読み込み中... ({len(wf_test_race_ids):,} レース)")
+        wf_payoffs_df = load_payoffs(DATABASE_URL, wf_test_race_ids)
+
         fold_args = [
-            (fold_idx, wf_train, wf_test, half_life_days, tuned_params)
+            (fold_idx, wf_train, wf_test, half_life_days, tuned_params, wf_payoffs_df)
             for fold_idx, (wf_train, wf_test) in enumerate(wf_splits, start=1)
         ]
         n_workers = min(len(fold_args), os.cpu_count() or 1)
@@ -305,8 +353,28 @@ def train_mode(
                 f"({r['test_start']} 〜 {r['test_end']})"
             )
 
+        all_bet_records = pd.concat(
+            [r.pop("_bet_records") for r in fold_results], ignore_index=True
+        )
+
         wf_summary = evaluation.walk_forward_summary(fold_results)
         logger.info(wf_summary.to_string())
+
+        logger.info(
+            "--- Walk-forward プール後 Bootstrap CI（馬連・三連複・ワイド, "
+            "全5フォールド合算, EV閾値1.0〜2.5を0.1刻み, 95%CI）---"
+        )
+        for bet_type in ("馬連", "三連複", "ワイド"):
+            pooled_ci = evaluation.pooled_bootstrap_ci(
+                all_bet_records[all_bet_records["bet_type"] == bet_type],
+                thresholds=_FINE_EV_THRESHOLDS,
+                random_state=42,
+            )
+            logger.info(f"[{bet_type}]")
+            if not pooled_ci.empty:
+                logger.info(pooled_ci.to_string())
+            else:
+                logger.info("  データなし")
 
     logger.info("モデルを保存中...")
     version_dir = model.save_models(models)
