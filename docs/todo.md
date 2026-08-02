@@ -44,6 +44,13 @@
 - [ ] 1995〜2006年の馬（`race_results.horse_id` にはあるが `horses` に存在しない約87,000頭）を `scraper.backfill_missing --horses-only` で遡及スクレイピングする。件数が多く対netkeibaリクエストが長時間・大量になるため、実行タイミング（負荷・レート制限への配慮）を検討してから着手する
 - [ ] 遡及補完後、sire/dam/broodmare_sire の feature importance が古い期間の walk-forward フォールドでも安定するか再確認する
 
+## 堅実・大穴戦略の軸重複解消
+
+> 発端: 2026-08-02 クイーンS予測で、`race.betting`（単勝・複勝・馬連・ワイド・三連複の軸、人気帯フィルタなしの純粋 top1）と「大穴」戦略が同一馬（馬番13）に収束した。
+> 検証済み: 穴馬専用モデルで解消を試みたが baseline に精度で負けた（[experiments.md](./experiments.md) 参照）ため、原因は学習不足ではなく `output.py` の戦略選択ロジック（両戦略ともレース内 top1 を人気帯で振り分けているだけ）にあると判明。
+
+- [x] 対応方針を決定: `race.betting` の単勝・馬連・ワイド・三連複（複勝を除く）に人気帯フィルタを追加し、top1 が7番人気以下の日は軸推奨を出さない（`_mark_recommended` の `top1_is_longshot` ガード）。「大穴」の選定基準を変える案（top1 以外の穴馬候補）は未検証の新戦略になり再バックテストが必要なため見送り。[spec.md](./spec.md) に確定仕様として反映済み
+
 ## predictor HTTP API
 
 - [x] `furlong-predictor` の `pyproject.toml` に `uvicorn` / `fastapi` 依存を追加

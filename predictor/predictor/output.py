@@ -161,6 +161,21 @@ def _mark_recommended(
             win_probs, n_iter=_MC_DEFAULT_N_ITER, rng=rng
         )
 
+        # レース内 win_prob 最大馬（top1）の人気帯。
+        # 「大穴」戦略は top1 が7番人気以下のときに発火する設計のため、
+        # 同じ条件下で単勝・馬連・ワイド・三連複の素の推奨（軸）まで出すと
+        # 「軸」と「大穴」が同一馬に収束し、2つの戦略が実質1つになってしまう
+        # （2026-08-02 クイーンS で発生）。そのため top1 が7番人気以下の
+        # レースでは軸側の推奨を出さず、「大穴」戦略のみに委ねる。
+        tier_labels = np.array(
+            [
+                _pop_tier(p) if pd.notna(p) else None
+                for p in group["_pop_rank"].to_numpy()
+            ]
+        )
+        top1 = int(np.argmax(win_probs_raw))
+        top1_is_longshot = tier_labels[top1] == "7番人気以下"
+
         # 単勝 EV（win_prob × win_odds）
         ev_vals = None
         if odds_col is not None:
@@ -168,21 +183,15 @@ def _mark_recommended(
             ev_vals = win_probs_raw * win_odds_vals
             df.loc[idx, "ev"] = ev_vals
             ev_mask = ev_vals > _EV_THRESHOLD
-            if ev_mask.any():
+            if ev_mask.any() and not top1_is_longshot:
                 masked_win = np.where(ev_mask, win_probs_raw, -1.0)
                 best_pos = int(np.argmax(masked_win))
                 df.loc[idx[best_pos], "recommended_win"] = True
-        else:
+        elif not top1_is_longshot:
             best_pos = int(np.argmax(win_probs_raw))
             df.loc[idx[best_pos], "recommended_win"] = True
 
         # 戦略別（堅実・大穴）の推奨買い目
-        tier_labels = np.array(
-            [
-                _pop_tier(p) if pd.notna(p) else None
-                for p in group["_pop_rank"].to_numpy()
-            ]
-        )
         for strat in STRATEGIES:
             positions, strat_ev = _select_strategy_pick(
                 win_probs_raw, ev_vals, tier_labels, strat
@@ -204,7 +213,7 @@ def _mark_recommended(
         df.loc[place_ranks[place_ranks <= 3].index, "recommended_place"] = True
 
         # 馬連: MC 馬連確率最大ペア
-        if n >= 2:
+        if n >= 2 and not top1_is_longshot:
             q_probs = _quinella_probability(orders)
             upper = np.triu(q_probs, k=1)
             if upper.max() > 0:
@@ -213,7 +222,7 @@ def _mark_recommended(
                 df.loc[idx[int(bj)], "recommended_quinella"] = True
 
         # ワイド: MC ワイド確率最大ペア
-        if n >= 2:
+        if n >= 2 and not top1_is_longshot:
             w_probs = _wide_probability(orders)
             upper_w = np.triu(w_probs, k=1)
             if upper_w.max() > 0:
@@ -222,7 +231,7 @@ def _mark_recommended(
                 df.loc[idx[int(wj)], "recommended_wide"] = True
 
         # 三連複: MC 三連複確率最大トリプレット
-        if n >= 3:
+        if n >= 3 and not top1_is_longshot:
             tb_probs = _trifecta_box_probability(orders)
             best_prob = 0.0
             best_triple: tuple[int, int, int] | None = None
