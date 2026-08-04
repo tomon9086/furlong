@@ -79,19 +79,47 @@ WITH race_last3f AS (
   FROM race_results
   WHERE finishing_position ~ '^[0-9]+$'
 ),
+race_time_z AS (
+  SELECT
+    race_id,
+    horse_id,
+    CASE WHEN STDDEV(ft) OVER (PARTITION BY race_id) > 0
+      THEN (AVG(ft) OVER (PARTITION BY race_id) - ft)
+        / STDDEV(ft) OVER (PARTITION BY race_id)
+      ELSE NULL
+    END AS race_time_zscore
+  FROM (
+    SELECT
+      race_id,
+      horse_id,
+      CASE
+        WHEN finish_time ~ '^[0-9]+:[0-9]+\\.[0-9]+$'
+          THEN SPLIT_PART(finish_time, ':', 1)::float * 60
+            + SPLIT_PART(finish_time, ':', 2)::float
+        WHEN finish_time ~ '^[0-9]+\\.?[0-9]*$'
+          THEN finish_time::float
+        ELSE NULL
+      END AS ft
+    FROM race_results
+    WHERE finishing_position ~ '^[0-9]+$'
+  ) t
+),
 history AS (
   SELECT
     rr.horse_id,    rr.jockey_id,    TO_DATE(r.date, 'YYYY/MM/DD') AS race_date,
     r.race_id,
     r.course_type,
     r.distance,
+    r.race_condition,
     rr.finishing_position::integer AS finishing_pos,
     CASE WHEN rr.last_3f ~ '^\\d+\\.?\\d*$' THEN rr.last_3f::float ELSE NULL END AS last_3f_num,
     CASE WHEN rr.passing_order ~ '^\\d' THEN SPLIT_PART(rr.passing_order, '-', 1)::integer ELSE NULL END AS first_corner_pos,
-    rl.last_3f_rank
+    rl.last_3f_rank,
+    rtz.race_time_zscore
   FROM race_results rr
   JOIN races r ON rr.race_id = r.race_id
   LEFT JOIN race_last3f rl ON rr.race_id = rl.race_id AND rr.horse_id = rl.horse_id
+  LEFT JOIN race_time_z rtz ON rr.race_id = rtz.race_id AND rr.horse_id = rtz.horse_id
   WHERE rr.finishing_position ~ '^[0-9]+$'
     AND rr.horse_id = ANY(%s)
 ),
@@ -101,6 +129,8 @@ windowed AS (
     jockey_id,
     course_type,
     distance,
+    race_condition,
+    race_date,
     AVG(finishing_pos) OVER w3  AS avg_finish_last3,
     MIN(finishing_pos) OVER w3  AS best_finish_last3,
     AVG(last_3f_num)   OVER w3  AS avg_last3f_last3,
@@ -121,6 +151,8 @@ windowed AS (
     AVG(last_3f_rank)     OVER w5  AS avg_last3f_rank_last5,
     AVG(last_3f_rank)     OVER w3c AS avg_last3f_rank_last3_cond,
     AVG(last_3f_rank)     OVER w5c AS avg_last3f_rank_last5_cond,
+    AVG(race_time_zscore) OVER w3  AS avg_speed_index_last3,
+    AVG(race_time_zscore) OVER w5  AS avg_speed_index_last5,
     ROW_NUMBER() OVER (PARTITION BY horse_id
       ORDER BY race_date DESC, race_id DESC) AS rn_all,
     ROW_NUMBER() OVER (PARTITION BY horse_id, course_type, distance
@@ -143,9 +175,12 @@ latest_all AS (
     avg_finish_last5, best_finish_last5, avg_last3f_last5,
     avg_corner_last3, avg_corner_last5,
     avg_last3f_rank_last3, avg_last3f_rank_last5,
+    avg_speed_index_last3, avg_speed_index_last5,
     distance AS prev_distance,
     course_type AS prev_course_type,
-    jockey_id AS prev_jockey_id
+    jockey_id AS prev_jockey_id,
+    race_condition AS prev_race_condition,
+    race_date AS prev_race_date
   FROM windowed
   WHERE rn_all = 1
 ),
@@ -167,9 +202,12 @@ SELECT
   la.avg_finish_last5, la.best_finish_last5, la.avg_last3f_last5,
   la.avg_corner_last3, la.avg_corner_last5,
   la.avg_last3f_rank_last3, la.avg_last3f_rank_last5,
+  la.avg_speed_index_last3, la.avg_speed_index_last5,
   la.prev_distance,
   la.prev_course_type,
   la.prev_jockey_id,
+  la.prev_race_condition,
+  la.prev_race_date,
   lc.avg_finish_last3_cond, lc.best_finish_last3_cond, lc.avg_last3f_last3_cond,
   lc.avg_finish_last5_cond, lc.best_finish_last5_cond, lc.avg_last3f_last5_cond,
   lc.avg_corner_last3_cond, lc.avg_corner_last5_cond,
@@ -423,6 +461,31 @@ def _parse_first_corner(value: object) -> int | None:
         return None
 
 
+_CLASS_LEVEL_PATTERNS: list[tuple[int, re.Pattern]] = [
+    (0, re.compile(r"新馬")),
+    (1, re.compile(r"未勝利")),
+    (2, re.compile(r"500万下|1勝クラス")),
+    (3, re.compile(r"1000万下|2勝クラス")),
+    (4, re.compile(r"1600万下|3勝クラス")),
+    (5, re.compile(r"オープン")),
+]
+
+
+def _extract_class_level(value: object) -> float | None:
+    """race_condition の自由文からクラス（格）レベルを抽出する（0=新馬 〜 5=オープン）。
+
+    新条件名（1勝クラス等）と旧条件名（500万下等）の両方に対応する
+    （JRAが2019年に呼称変更したため、収録期間内に両方の表記が混在する）。
+    """
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    s = str(value)
+    for level, pattern in _CLASS_LEVEL_PATTERNS:
+        if pattern.search(s):
+            return float(level)
+    return None
+
+
 def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFrame:
     """生データを機械学習に適した形に変換する。
 
@@ -441,6 +504,11 @@ def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFra
         df["finishing_position"] = df["finishing_position"].astype(int)
     df["is_win"] = (df["finishing_position"] == 1).astype(int)
     df["is_placed"] = (df["finishing_position"] <= 3).astype(int)
+
+    # クラス（格）レベル抽出（新馬〜オープンの序列。前走比較で class_change に使う）
+    if "race_condition" in df.columns:
+        df["class_level"] = df["race_condition"].apply(_extract_class_level)
+        df["class_level"] = df["class_level"].astype(float)
 
     # 数値変換
     for col in (
@@ -484,6 +552,13 @@ def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFra
         method="min", ascending=True, na_option="keep"
     )
 
+    # タイムのレース内相対値（z-score。正値=レース平均より速い）
+    _ft_mean = df.groupby("race_id")["finish_time_sec"].transform("mean")
+    _ft_std = df.groupby("race_id")["finish_time_sec"].transform("std")
+    df["race_time_zscore"] = (_ft_mean - df["finish_time_sec"]) / _ft_std.where(
+        _ft_std > 0
+    )
+
     # 近走成績フィーチャー（predict 時に NULL→object になるため数値化）
     for col in (
         "avg_finish_last3",
@@ -506,6 +581,8 @@ def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFra
         "avg_last3f_rank_last5",
         "avg_last3f_rank_last3_cond",
         "avg_last3f_rank_last5_cond",
+        "avg_speed_index_last3",
+        "avg_speed_index_last5",
         "jockey_win_rate_venue_cond",
         "trainer_win_rate_last30",
         "trainer_prior_win_rate",
@@ -545,6 +622,31 @@ def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFra
             != df.loc[has_prev, "prev_jockey_id"].astype(str)
         ).astype(float)
         df = df.drop(columns=["prev_jockey_id"])
+
+    # クラス変化（前走との差）: predict 時は prev_race_condition が SQL から来る
+    if "prev_race_condition" in df.columns:
+        prev_class_level = df["prev_race_condition"].apply(_extract_class_level)
+        df["class_change"] = df["class_level"] - prev_class_level
+        df = df.drop(columns=["prev_race_condition"])
+
+    # 出走間隔（前走からの経過日数）: predict 時は prev_race_date が SQL から来る
+    if "prev_race_date" in df.columns:
+        df["days_since_last_race"] = (
+            df["date"] - pd.to_datetime(df["prev_race_date"], errors="coerce")
+        ).dt.days.astype(float)
+        df = df.drop(columns=["prev_race_date"])
+
+    # レース内ペース予想: predict 時は avg_corner_last3 が既に数値化済み
+    # （学習時は compute_recent_stats() 側で算出後に同じロジックを適用）
+    if "avg_corner_last3" in df.columns:
+        df["corner_style_race_rank"] = df.groupby("race_id", observed=True)[
+            "avg_corner_last3"
+        ].rank(method="min", ascending=True, na_option="bottom")
+        df["_is_leader_type"] = (df["avg_corner_last3"] <= 5.0).astype(float)
+        df["race_leader_count"] = df.groupby("race_id", observed=True)[
+            "_is_leader_type"
+        ].transform("sum")
+        df = df.drop(columns=["_is_leader_type"])
 
     # 性別・年齢の分離（例: '牡5' → sex='牡', age=5）
     df["sex"] = df["sex_age"].str.extract(r"^([^\d]+)")
@@ -603,10 +705,16 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
     df["last_3f"] = df["last_3f"].astype(float)
     df["first_corner_pos"] = df["first_corner_pos"].astype(float)
     df["last_3f_rank"] = df["last_3f_rank"].astype(float)
+    df["race_time_zscore"] = df["race_time_zscore"].astype(float)
 
     # ── 全レース共通: 直近3走・直近5走 ─────────────────────────────────────
     # 日付順に1回だけソートし、groupby().rolling() が各馬内で時系列順に動作するようにする
     df = df.sort_values(["horse_id", "date", "race_id"]).reset_index(drop=True)
+
+    # 出走間隔（前走からの経過日数）
+    df["_date_s"] = df.groupby("horse_id", observed=True)["date"].shift(1)
+    df["days_since_last_race"] = (df["date"] - df["_date_s"]).dt.days.astype(float)
+    df = df.drop(columns=["_date_s"])
 
     # 距離変化（前走との距離差）
     df["_dist_s"] = df.groupby("horse_id", observed=True)["distance"].shift(1)
@@ -614,6 +722,12 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
         df["distance"], errors="coerce"
     ) - pd.to_numeric(df["_dist_s"], errors="coerce")
     df = df.drop(columns=["_dist_s"])
+
+    # クラス変化（前走との class_level 差）
+    if "class_level" in df.columns:
+        df["_class_s"] = df.groupby("horse_id", observed=True)["class_level"].shift(1)
+        df["class_change"] = df["class_level"] - df["_class_s"]
+        df = df.drop(columns=["_class_s"])
 
     # コース替わりフラグ（前走との course_type 変更）
     df["_course_s"] = df.groupby("horse_id", observed=True)["course_type"].shift(1)
@@ -631,7 +745,13 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
 
     # 直近3走・5走: shift(1..5) をまとめて計算（groupby().rolling() より大幅に高速）
     # rolling(n, min_periods=1).mean/min は shift(1)..shift(n) の mean/min と等価
-    _roll_cols = ["finishing_position", "last_3f", "first_corner_pos", "last_3f_rank"]
+    _roll_cols = [
+        "finishing_position",
+        "last_3f",
+        "first_corner_pos",
+        "last_3f_rank",
+        "race_time_zscore",
+    ]
     _grp = df.groupby("horse_id", observed=True)
     _all_shifts = pd.concat(
         [_grp[_roll_cols].shift(k).add_suffix(f"__s{k}") for k in range(1, 6)],
@@ -650,6 +770,9 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
 
         _sub_rnk = _all_shifts[[f"last_3f_rank__s{k}" for k in range(1, n + 1)]]
         df[f"avg_last3f_rank_last{n}"] = _sub_rnk.mean(axis=1, skipna=True)
+
+        _sub_tz = _all_shifts[[f"race_time_zscore__s{k}" for k in range(1, n + 1)]]
+        df[f"avg_speed_index_last{n}"] = _sub_tz.mean(axis=1, skipna=True)
 
     # ── 同コース種別・同距離: 直近3走・直近5走 ──────────────────────────────
     cond_key = ["horse_id", "course_type", "distance"]
@@ -835,6 +958,16 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
     df["bracket_distance_avg_finish"] = df_bracket["bracket_distance_avg_finish"]
     df = df.drop(columns=["_distance_band"])
 
+    # ── レース内ペース予想: レース内の相対脚質順位・先行馬（逃げ・先行）頭数 ──────────
+    df["corner_style_race_rank"] = df.groupby("race_id", observed=True)[
+        "avg_corner_last3"
+    ].rank(method="min", ascending=True, na_option="bottom")
+    df["_is_leader_type"] = (df["avg_corner_last3"] <= 5.0).astype(float)
+    df["race_leader_count"] = df.groupby("race_id", observed=True)[
+        "_is_leader_type"
+    ].transform("sum")
+    df = df.drop(columns=["_is_leader_type"])
+
     return df
 
 
@@ -886,6 +1019,7 @@ def get_feature_columns(extra_columns: list[str] | None = None) -> list[str]:
         "grade",
         "head_count",
         "is_handicap",
+        "class_level",
         # 出走馬情報
         "horse_number",
         "bracket_number",
@@ -900,6 +1034,8 @@ def get_feature_columns(extra_columns: list[str] | None = None) -> list[str]:
         "distance_change",
         "course_type_change",
         "jockey_change",
+        "class_change",
+        "days_since_last_race",
         # 近走成績（全レース・直近3走）
         "avg_finish_last3",
         "best_finish_last3",
@@ -922,12 +1058,18 @@ def get_feature_columns(extra_columns: list[str] | None = None) -> list[str]:
         # 先行指数（同コース種別・同距離）
         "avg_corner_last3_cond",
         "avg_corner_last5_cond",
+        # レース内ペース予想
+        "corner_style_race_rank",
+        "race_leader_count",
         # 上がり3ハロン相対順位（全レース）
         "avg_last3f_rank_last3",
         "avg_last3f_rank_last5",
         # 上がり3ハロン相対順位（同コース種別・同距離）
         "avg_last3f_rank_last3_cond",
         "avg_last3f_rank_last5_cond",
+        # タイム偏差値（スピード指数）
+        "avg_speed_index_last3",
+        "avg_speed_index_last5",
         # 血統
         "sire",
         "dam",

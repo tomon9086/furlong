@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from predictor.preprocessing import (
+    _extract_class_level,
     _parse_finish_time,
     _parse_first_corner,
     compute_recent_stats,
@@ -56,6 +57,49 @@ class TestParseFirstCorner:
 
     def test_invalid(self):
         assert _parse_first_corner("abc") is None
+
+
+# ──────────────────────────────────────────────
+# _extract_class_level
+# ──────────────────────────────────────────────
+
+
+class TestExtractClassLevel:
+    def test_shinba(self):
+        assert _extract_class_level("4回中山7日目 2歳新馬　[指](馬齢)") == 0.0
+
+    def test_mishoori(self):
+        assert _extract_class_level("2回中山2日目 3歳未勝利　[指](馬齢)") == 1.0
+
+    def test_old_naming_500man(self):
+        assert _extract_class_level("1回中山2日目 4歳以上500万下　[指](定量)") == 2.0
+
+    def test_new_naming_1shou_class(self):
+        assert _extract_class_level("3回中山7日目 4歳以上1勝クラス　(混)(定量)") == 2.0
+
+    def test_old_naming_1000man(self):
+        assert _extract_class_level("5回京都2日目 3歳以上1000万下　(定量)") == 3.0
+
+    def test_new_naming_2shou_class(self):
+        assert _extract_class_level("1回中京9日目 4歳以上2勝クラス　(定量)") == 3.0
+
+    def test_old_naming_1600man(self):
+        assert _extract_class_level("2回東京12日目 4歳以上1600万下　(ハンデ)") == 4.0
+
+    def test_new_naming_3shou_class(self):
+        assert _extract_class_level("5回中山2日目 3歳以上3勝クラス　(ハンデ)") == 4.0
+
+    def test_open(self):
+        assert _extract_class_level("3回中山7日目 4歳以上オープン　(ハンデ)") == 5.0
+
+    def test_none(self):
+        assert _extract_class_level(None) is None
+
+    def test_nan(self):
+        assert _extract_class_level(float("nan")) is None
+
+    def test_no_match(self):
+        assert _extract_class_level("よくわからない条件") is None
 
 
 # ──────────────────────────────────────────────
@@ -199,6 +243,66 @@ class TestPreprocess:
         df = preprocess(raw)
         assert pd.isna(df["course_type_change"].iloc[0])
 
+    def test_class_level_extracted_from_race_condition(self):
+        """race_condition から class_level が抽出されること。"""
+        raw = _make_raw_df(1)
+        raw["race_condition"] = ["2回中山2日目 3歳未勝利　[指](馬齢)"]
+        df = preprocess(raw)
+        assert df["class_level"].iloc[0] == pytest.approx(1.0)
+
+    def test_prev_race_condition_creates_class_change(self):
+        """prev_race_condition が与えられた場合、class_change が生成されること。"""
+        raw = _make_raw_df(1)
+        raw["race_condition"] = ["3回中山7日目 4歳以上1勝クラス　(混)(定量)"]  # =2
+        raw["prev_race_condition"] = ["2回中山2日目 3歳未勝利　[指](馬齢)"]  # =1
+        df = preprocess(raw)
+        assert "class_change" in df.columns
+        assert "prev_race_condition" not in df.columns
+        assert df["class_change"].iloc[0] == pytest.approx(1.0)  # 1勝クラスへ昇級
+
+    def test_prev_race_condition_none_is_nan(self):
+        """prev_race_condition が NULL の場合、class_change は NaN であること。"""
+        raw = _make_raw_df(1)
+        raw["race_condition"] = ["2回中山2日目 3歳未勝利　[指](馬齢)"]
+        raw["prev_race_condition"] = [None]
+        df = preprocess(raw)
+        assert pd.isna(df["class_change"].iloc[0])
+
+    def test_prev_race_date_creates_days_since_last_race(self):
+        """prev_race_date が与えられた場合、days_since_last_race が計算されること。"""
+        raw = _make_raw_df(2)
+        raw["date"] = ["2024/01/10", "2024/01/10"]
+        raw["prev_race_date"] = [pd.Timestamp("2023-12-20"), pd.Timestamp("2024-01-01")]
+        df = preprocess(raw)
+        assert "days_since_last_race" in df.columns
+        assert "prev_race_date" not in df.columns
+        assert df["days_since_last_race"].iloc[0] == pytest.approx(21.0)
+        assert df["days_since_last_race"].iloc[1] == pytest.approx(9.0)
+
+    def test_prev_race_date_none_is_nan(self):
+        """prev_race_date が NULL の場合、days_since_last_race は NaN であること。"""
+        raw = _make_raw_df(1)
+        raw["prev_race_date"] = [None]
+        df = preprocess(raw)
+        assert pd.isna(df["days_since_last_race"].iloc[0])
+
+    def test_race_time_zscore_computed_within_race(self):
+        """race_time_zscore がレース内のタイム分布から z-score として計算されること。"""
+        raw = _make_raw_df(3)
+        raw["race_id"] = "R0"  # 3頭とも同一レースにする
+        raw["finish_time"] = ["1:33.0", "1:34.0", "1:35.0"]
+        df = preprocess(raw)
+        assert df["race_time_zscore"].iloc[0] == pytest.approx(1.0)  # 最速
+        assert df["race_time_zscore"].iloc[1] == pytest.approx(0.0)  # 平均
+        assert df["race_time_zscore"].iloc[2] == pytest.approx(-1.0)  # 最遅
+
+    def test_race_time_zscore_nan_when_all_same_time(self):
+        """全馬同タイムで標準偏差が0の場合、race_time_zscore は NaN であること。"""
+        raw = _make_raw_df(3)
+        raw["race_id"] = "R0"  # 3頭とも同一レース、finish_time はデフォルトで全馬同じ
+        df = preprocess(raw)
+        assert df["race_time_zscore"].isna().all()
+
 
 # ──────────────────────────────────────────────
 # compute_recent_stats
@@ -263,6 +367,90 @@ class TestComputeRecentStats:
         h0_r4 = result[(result["horse_id"] == "H0") & (result["race_id"] == "R4")]
         assert h0_r4["bracket_distance_avg_finish"].iloc[0] == pytest.approx(1.0)
 
+    def test_corner_style_race_rank_and_leader_count(self):
+        """avg_corner_last3 に基づくレース内相対順位・先行馬頭数が正しいこと。"""
+        rows = []
+        # R0: 3頭が異なる先行度（H0=先頭寄り, H1=中団, H2=後方）で走る
+        _corner_positions = [(0, "01-01-01-01"), (1, "05-05-05-05"), (2, "10-10-10-10")]
+        for horse_idx, corner_pos in _corner_positions:
+            rows.append(
+                {
+                    "race_id": "R0",
+                    "date": "2024/01/01",
+                    "venue": "東京",
+                    "course_type": "芝",
+                    "distance": "1600",
+                    "direction": "右",
+                    "weather": "晴",
+                    "track_condition": "良",
+                    "grade": "G1",
+                    "head_count": 3,
+                    "horse_number": str(horse_idx + 1),
+                    "finishing_position": str(horse_idx + 1),
+                    "bracket_number": str(horse_idx + 1),
+                    "horse_id": f"H{horse_idx}",
+                    "horse_name": f"Horse{horse_idx}",
+                    "sex_age": "牡4",
+                    "weight_carried": "57.0",
+                    "jockey_id": f"J{horse_idx}",
+                    "jockey_name": f"Jockey{horse_idx}",
+                    "finish_time": "1:33.4",
+                    "passing_order": corner_pos,
+                    "last_3f": "34.5",
+                    "odds": "5.2",
+                    "popularity": "2",
+                    "horse_weight": "480",
+                    "horse_weight_diff": "0",
+                    "trainer_id": f"T{horse_idx}",
+                    "owner": f"O{horse_idx}",
+                    "sire": "Sire",
+                    "dam": "Dam",
+                    "broodmare_sire": "BMS",
+                }
+            )
+        # R1: 同じ3頭が再度出走（R0の脚質実績が avg_corner_last3 に反映される）
+        for horse_idx in range(3):
+            row = dict(rows[horse_idx])
+            row["race_id"] = "R1"
+            row["date"] = "2024/01/02"
+            rows.append(row)
+        raw = pd.DataFrame(rows)
+        df = preprocess(raw)
+        result = compute_recent_stats(df)
+        r1 = result[result["race_id"] == "R1"].set_index("horse_id")
+        # H0(avg_corner=1)が最も先行 → rank1、H2(avg_corner=10)が最も後方 → rank3
+        assert r1.loc["H0", "corner_style_race_rank"] == pytest.approx(1.0)
+        assert r1.loc["H1", "corner_style_race_rank"] == pytest.approx(2.0)
+        assert r1.loc["H2", "corner_style_race_rank"] == pytest.approx(3.0)
+        # 閾値5.0以下（H0=1, H1=5）の2頭が先行馬としてカウントされる
+        assert r1.loc["H0", "race_leader_count"] == pytest.approx(2.0)
+
+    def test_avg_speed_index_first_race_is_nan(self):
+        """1走目のタイム偏差値（スピード指数）は NaN であること（過去データなし）。"""
+        df = preprocess(_make_multi_race_raw_df())
+        result = compute_recent_stats(df)
+        first_races = result[result["race_id"] == "R0"]
+        assert first_races["avg_speed_index_last3"].isna().all()
+
+    def test_avg_speed_index_uses_past_only(self):
+        """過去に速いタイムで走った馬ほど avg_speed_index_last3 が高くなること。"""
+        raw = _make_multi_race_raw_df()
+        # R0: H0が93秒（速い）、H1が95秒（遅い）
+        raw.loc[(raw["horse_id"] == "H0") & (raw["race_id"] == "R0"), "finish_time"] = (
+            "1:33.0"
+        )
+        raw.loc[(raw["horse_id"] == "H1") & (raw["race_id"] == "R0"), "finish_time"] = (
+            "1:35.0"
+        )
+        df = preprocess(raw)
+        result = compute_recent_stats(df)
+        h0_r1 = result[(result["horse_id"] == "H0") & (result["race_id"] == "R1")]
+        h1_r1 = result[(result["horse_id"] == "H1") & (result["race_id"] == "R1")]
+        assert (
+            h0_r1["avg_speed_index_last3"].iloc[0]
+            > h1_r1["avg_speed_index_last3"].iloc[0]
+        )
+
     def test_course_type_change_first_race_is_nan(self):
         """1走目のコース替わりフラグは NaN であること（前走なし）。"""
         df = preprocess(_make_multi_race_raw_df())
@@ -276,6 +464,43 @@ class TestComputeRecentStats:
         result = compute_recent_stats(df)
         later_races = result[result["race_id"] != "R0"]
         assert (later_races["course_type_change"] == 0.0).all()
+
+    def test_class_change_first_race_is_nan(self):
+        """1走目のクラス変化は NaN であること（前走なし）。"""
+        raw = _make_multi_race_raw_df()
+        raw["race_condition"] = "3歳未勝利"
+        df = preprocess(raw)
+        result = compute_recent_stats(df)
+        first_races = result[result["race_id"] == "R0"]
+        assert first_races["class_change"].isna().all()
+
+    def test_class_change_computed_correctly(self):
+        """2走目以降はクラスレベルの前走差になること（昇級で正の値）。"""
+        raw = _make_multi_race_raw_df()
+        raw["race_condition"] = "3歳未勝利"  # class_level=1
+        # H0 の R1 を 1勝クラス（class_level=2）に変更 → 前走比 +1
+        raw.loc[
+            (raw["horse_id"] == "H0") & (raw["race_id"] == "R1"), "race_condition"
+        ] = "4歳以上1勝クラス"
+        df = preprocess(raw)
+        result = compute_recent_stats(df)
+        h0_r1 = result[(result["horse_id"] == "H0") & (result["race_id"] == "R1")]
+        assert h0_r1["class_change"].iloc[0] == pytest.approx(1.0)
+
+    def test_days_since_last_race_first_race_is_nan(self):
+        """1走目の出走間隔は NaN であること（前走なし）。"""
+        df = preprocess(_make_multi_race_raw_df())
+        result = compute_recent_stats(df)
+        first_races = result[result["race_id"] == "R0"]
+        assert first_races["days_since_last_race"].isna().all()
+
+    def test_days_since_last_race_computed_correctly(self):
+        """2走目以降は前走との日数差になること。"""
+        df = preprocess(_make_multi_race_raw_df())
+        result = compute_recent_stats(df)
+        # H0: R0=2024/01/01, R1=2024/01/02 -> 1日
+        h0_r1 = result[(result["horse_id"] == "H0") & (result["race_id"] == "R1")]
+        assert h0_r1["days_since_last_race"].iloc[0] == pytest.approx(1.0)
 
     def test_course_type_change_different_course_is_one(self):
         """2走目のコースが前走と異なる場合、フラグは1であること。"""

@@ -242,17 +242,19 @@ furlong/
 
 | カテゴリ | 特徴量（カラム） |
 |---|---|
-| レース条件 | `venue`, `course_type`, `distance`, `direction`, `weather`, `track_condition`, `grade`, `head_count` |
+| レース条件 | `venue`, `course_type`, `distance`, `direction`, `weather`, `track_condition`, `grade`, `head_count`, `class_level`（`race_condition` から抽出したクラス序列。0=新馬〜5=オープン） |
 | 出走馬 | `horse_number`, `bracket_number`, `sex`（`sex_age` より分離）, `age`（同）, `weight_carried`, `horse_weight`, `horse_weight_diff`, `horse_weight_relative`（レース内 z-score） |
-| 前走との比較 | `distance_change`（距離変化）, `course_type_change`（コース替わりフラグ）, `jockey_change`（騎手乗り替わりフラグ） |
+| 前走との比較 | `distance_change`（距離変化）, `course_type_change`（コース替わりフラグ）, `jockey_change`（騎手乗り替わりフラグ）, `class_change`（クラス変化。正=昇級・負=降級）, `days_since_last_race`（出走間隔・経過日数） |
 | 近走成績（全レース・直近3走） | `avg_finish_last3`, `best_finish_last3`, `avg_last3f_last3` |
 | 近走成績（全レース・直近5走） | `avg_finish_last5`, `best_finish_last5`, `avg_last3f_last5` |
 | 近走成績（同コース種別・同距離・直近3走） | `avg_finish_last3_cond`, `best_finish_last3_cond`, `avg_last3f_last3_cond` |
 | 近走成績（同コース種別・同距離・直近5走） | `avg_finish_last5_cond`, `best_finish_last5_cond`, `avg_last3f_last5_cond` |
 | 先行指数（全レース） | `avg_corner_last3`, `avg_corner_last5`（最初のコーナー通過順位の平均） |
 | 先行指数（同コース種別・同距離） | `avg_corner_last3_cond`, `avg_corner_last5_cond` |
+| レース内ペース予想 | `corner_style_race_rank`（`avg_corner_last3` のレース内相対順位）, `race_leader_count`（`avg_corner_last3 <= 5.0` の頭数） |
 | 上がり3ハロン相対順位（全レース） | `avg_last3f_rank_last3`, `avg_last3f_rank_last5` |
 | 上がり3ハロン相対順位（同コース種別・同距離） | `avg_last3f_rank_last3_cond`, `avg_last3f_rank_last5_cond` |
+| タイム偏差値（スピード指数） | `avg_speed_index_last3`, `avg_speed_index_last5`（タイムのレース内z-scoreを直近走で平均） |
 | 血統 | `sire`, `dam`, `broodmare_sire` |
 | 騎手統計 | `jockey_win_rate_venue_cond`（場・コース種別の勝率）, `jockey_prior_win_rate`, `jockey_prior_mounts`（デビューからそのレース直前までの全期間累積勝率・累積騎乗数） |
 | 調教師統計 | `trainer_win_rate_last30`（直近30走の勝率）, `trainer_prior_win_rate`, `trainer_prior_mounts`（全期間累積勝率・累積騎乗数） |
@@ -261,6 +263,10 @@ furlong/
 | 枠番×距離帯 | `bracket_distance_avg_finish`（枠番×距離帯の平均着順） |
 
 > **全期間累積勝率系（`*_prior_win_rate`, `*_prior_mounts`）の共通ロジック**: 日付単位で騎乗数・勝利数を集計してから1日分ずらして累積することで、当該レース自身は集計から除外する（同日複数レースの前後関係は不明なため）。既存の直近30走・venue×course_type限定版とは別軸として併存させる（置き換えではない）。検証結果は [experiments.md](./experiments.md) 参照（調教師・騎手は2026-08-01採用、馬主は同日追加採用）。
+
+> **`class_level`（クラス序列）の抽出方法**: `races.race_condition`（レース条件の自由文）から正規表現でクラスを判定する（0=新馬, 1=未勝利, 2=1勝クラス/旧500万下, 3=2勝クラス/旧1000万下, 4=3勝クラス/旧1600万下, 5=オープン）。JRAが2019年にクラス呼称を変更したため、新旧両方の表記に対応している。JRAレースでは99.8%で `race_condition` が取得済みで抽出可能（地方競馬は非対応レースが多く欠損しうる）。`class_change` は前走との `class_level` 差（正=昇級、負=降級）。2026-08-03採用、詳細は [experiments.md](./experiments.md) 参照。
+
+> **`days_since_last_race`（出走間隔）は2段階の検証を経て採用。** 単独での初回検証（2026-08-03朝、`class_change`等の採用前）では標準splitの回収率が悪化し一度不採用と判定したが、walk-forward検証は行わなかった。後日、他の特徴量（クラス変化・レース内ペース予想・スピード指数）採用後の状態で再検証したところ、標準splitでの悪化はほぼ誤差範囲まで縮小し、walk-forwardでは4指標（win_accuracy・recovery_rate・win_logloss・place_logloss）すべてが改善したため採用に切り替えた。特徴量の価値は既存の特徴量セットに依存して変わりうる（単独検証の結果を過信しない）教訓として記録。詳細は [experiments.md](./experiments.md) 参照。
 
 > **市場オッズ（`odds`, `popularity`）は学習特徴量から除外。** 確定オッズを含めると「市場オッズの模倣」になり控除率分の損失が上限となるため。事前オッズ（`pre_race_odds.win_odds`）は EV 計算にのみ使用する。
 

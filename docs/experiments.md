@@ -894,3 +894,337 @@ win_logloss・place_loglossは標準split・walk-forwardの両方で一貫して
 **フェーズ4の132〜178%は再現しなかった。** 現行モデル・walk-forwardプールbootstrap CIでは、7番人気以下タイの馬連・三連複・ワイドはどの EV 閾値でも回収率が50〜70%程度に留まり、CI上限も100%を一度も超えない（＝高い確度で損失側）。フェーズ4の高回収率は単一split・複数券種×人気帯×閾値の多重比較の中から偶然良く見えた組み合わせを拾った可能性が高く、「回収率は分散が大きい指標であり単一splitの点推定は信用できない」という本プロジェクトで繰り返し確認済みの教訓（[2026-07-30 の時間減衰検証](#時間減衰サンプルウェイトhalf_life_days比較2026-07-30)等）と整合する結果になった。
 
 **「大穴」戦略の設計（単勝・EVフィルタなし・回収率マイナスのレクリエーション枠という位置付け）に変更の必要はない。** 馬連・三連複・ワイドいずれも単勝より優れた代替にはならないことが確認できたため、7番人気以下タイに関しては現状の「大穴」の枠組み（勝てる戦略ではなく、意図的に期待値度外視の一撃狙い）が最も誠実な表現のままとなる。
+
+---
+
+## 出走間隔（days_since_last_race）特徴量の追加検討（2026-08-03）
+
+> 計画: [plan/feature-expansion-2026-08.md](./plan/feature-expansion-2026-08.md) バッチ1-1
+> 発端: 「特徴量は多いほどいい」という提案を受け、既存の `distance_change`/`course_type_change`/`jockey_change`（前走との比較）の枠組みに前走からの経過日数（休養明け・連闘の代理指標）を追加できないか検証した。
+
+`_RECENT_STATS_QUERY`（predict時）に `prev_race_date` を追加し、`preprocess()` で `days_since_last_race = date - prev_race_date` を計算。学習時は `compute_recent_stats()` に `groupby("horse_id").shift(1)` で同様のロジックを実装（他の前走比較特徴量と同じ日付ソート順・情報リーク防止パターン）。`get_feature_columns()` に非破壊的に追加。
+
+### 標準 train/val/test split での比較（`train --no-walkforward`、同一データスナップショット）
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| ベースライン（追加前） | 21.96% | 72.44% | 0.2365 | 0.4725 |
+| `days_since_last_race` 追加後 | 21.80%（-0.16pt） | 70.63%（**-1.81pt**） | 0.2362（僅かに改善） | 0.4714（僅かに改善） |
+
+### 判定
+
+Log Loss（単勝・複勝とも）はごくわずかに改善したが、win_accuracy・recovery_rate はいずれも悪化した。[plan/feature-expansion-2026-08.md](./plan/feature-expansion-2026-08.md) で定めた採用基準（「Log Lossが改善または横ばい**かつ**回収率も改善している場合のみ walk-forward bootstrap CI による正式検証に進む」）に照らすと、回収率が明確に悪化しているためこの時点で不採用と判断し、walk-forward検証には進めなかった。Log Loss の改善幅（0.03〜0.23%）も単一splitのノイズの範囲内とみられる。
+
+「特徴量は多いほどいい」という前提への反証がまた一つ増えた形（Embeddingハイブリッド実験と同様のパターン）。休養明け・連闘は直感的には効きそうな特徴量だが、実際にはこのモデル・このデータでは既存の近走成績特徴量（`avg_finish_last3` 等）と情報が重複しており、新規の学習ノイズとして働いた可能性がある。
+
+### 結論・不採用
+
+コード変更（SQL・`preprocess()`・`compute_recent_stats()`・`get_feature_columns()` の該当箇所）は revert 済み。バッチ1の残り2案（馬場状態別の適性統計・クラス変化）は個別に検証を続ける。
+
+---
+
+## 馬場状態別の適性統計（`*_trackcond`）の追加検討（2026-08-03）
+
+> 計画: [plan/feature-expansion-2026-08.md](./plan/feature-expansion-2026-08.md) バッチ1-2
+
+既存の `course_type`×`distance` 条件別成績（`*_cond`）と同じ枠組みで、`track_condition`（良／稍重／重／不良）別の直近3走・5走成績（`avg_finish`, `best_finish`, `avg_last3f`）を6カラム追加。SQL側は `_RECENT_STATS_QUERY` に `w3tc`/`w5tc` ウィンドウと `latest_trackcond` CTE を追加し、predict時は対象レースの `track_condition` をパラメータとして渡す方式（`course_type`/`distance` の `latest_cond` と同一パターン）。学習時は `compute_recent_stats()` に `["horse_id", "track_condition"]` キーの groupby+shift ブロックを追加。
+
+### 標準 train/val/test split での比較（`train --no-walkforward`、同一データスナップショット）
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| ベースライン（追加前） | 21.96% | 72.44% | 0.2365 | 0.4725 |
+| `*_trackcond` 追加後 | 21.76%（-0.20pt） | 71.18%（**-1.26pt**） | 0.2364（ほぼ横ばい） | 0.4726（ほぼ横ばい、僅かに悪化） |
+
+### 判定
+
+Log Loss は単勝・複勝ともほぼ横ばい（改善とは言えない）で、win_accuracy・recovery_rate は悪化した。採用基準（Log Loss改善**かつ**回収率改善）を満たさないため不採用。バッチ1-1（出走間隔）に続き2件連続で「特徴量追加＝改善」の反証となった。仮説として、`track_condition` は4カテゴリしかなく大半が「良」に偏っているため、同条件データのサンプル数が少ない「稍重／重／不良」では集計値のノイズが大きく、既存の `avg_finish_last3`（全レース）や `avg_finish_last3_cond`（同コース種別・同距離）と情報が重複しつつノイズだけ増やした可能性がある。
+
+### 結論・不採用
+
+コード変更（SQL・`compute_recent_stats()`・`get_feature_columns()` の該当箇所）は revert 済み。
+
+---
+
+## クラス（格）変化（`class_level`/`class_change`）の追加検討（2026-08-03）
+
+> 計画: [plan/feature-expansion-2026-08.md](./plan/feature-expansion-2026-08.md) バッチ1-3
+
+`races.race_condition`（レース条件の自由文、例: `"...4歳以上1勝クラス　(混)(定量)"`）から正規表現でクラス（格）レベルを抽出し（0=新馬, 1=未勝利, 2=1勝クラス/旧500万下, 3=2勝クラス/旧1000万下, 4=3勝クラス/旧1600万下, 5=オープン。JRAが2019年に呼称変更した新旧両方の表記に対応）、現在のクラス `class_level` と前走からの変化 `class_change`（正=昇級、負=降級）を追加。JRAレース（学習データの大半）では99.8%で `race_condition` が取得済みで抽出可能。predict時は `_RECENT_STATS_QUERY` に `prev_race_condition` を追加して前走の生テキストを取得し、`preprocess()` 内で同じ抽出関数を適用（`prev_distance`等と同一パターン）。
+
+### 標準 train/val/test split での比較（`train --no-walkforward`、同一データスナップショット）
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| ベースライン | 21.96% | 72.44% | 0.2365 | 0.4725 |
+| `class_level`/`class_change` 追加後 | **22.22%（+0.26pt）** | 70.06%（-2.38pt） | **0.2358（改善）** | **0.4699（改善）** |
+
+Log Lossの改善幅（win: -0.0007, place: -0.0026）はバッチ1-1・1-2で見られたノイズ相当の変化（±0.0001〜0.0003）より明確に大きく、win_accuracyも改善したため、標準splitの回収率悪化だけでは不採用と判断せず（[調教師・騎手の全期間累積勝率フィーチャー追加](#調教師騎手の全期間累積勝率フィーチャー追加2026-08-01)と同型のパターン）、walk-forwardによる正式検証に進んだ。
+
+### Walk-forward（5フォールド、n_splits=5）平均での比較
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| ベースライン | 23.44% | 79.90% | 0.2261 | 0.4565 |
+| `class_level`/`class_change` 追加後 | **23.81%（+0.37pt）** | 79.20%（-0.70pt、誤差範囲） | **0.2252（改善）** | **0.4538（改善）** |
+
+フォールド別回収率（追加後）: 78.6% / 81.8% / 84.3% / 81.0% / 70.3%（フォールド5が最も低いのは従来と同じ傾向。ベースラインのフォールド5も71.4%であり、フォールド間の分散自体がこの2点差を上回る）。
+
+### 判定
+
+win_accuracy・win_logloss・place_loglossは標準split・walk-forwardの両方で一貫して改善し、悪化した指標はない。recovery_rateのみ両方でわずかに悪化しているが、フォールド単位の変動幅（70〜84%）の方が大きく、誤差範囲と判断するのが妥当。**クラス（格）変化はモデルにとって明確に有用な情報を持っている。**
+
+### 結論・採用
+
+`class_level`, `class_change` を `get_feature_columns()` に採用済み（非破壊的追加、既存特徴量は変更なし）。より大きな検証予算をかけたbootstrap CIでの標準split単勝top1回収率の有意差検証は未実施で、次の余地として残る。
+
+---
+
+## 累積獲得賞金（`horse_prior_earnings`）の追加検討（2026-08-03）
+
+> 計画: [plan/feature-expansion-2026-08.md](./plan/feature-expansion-2026-08.md) バッチ2-1
+> 比較対象は「クラス変化採用後」の現行コード（本セクションより前の実験で採用済み）を baseline とする。
+
+`race_results.prize_money`（カンマ区切り文字列、例: `"1,020.0"`）をパースし、当該レースより前の全獲得賞金合計を `horse_prior_earnings` として追加。学習時は `groupby("horse_id").cumsum()` シフトで当該レース自身を除外、predict時は専用SQL（`WHERE finishing_position ~ '^[0-9]+$'` で確定済みレースのみ集計）で対応。未出走馬・未受賞は0円扱い。
+
+### 標準 train/val/test split での比較（`train --no-walkforward`、class_change込みbaseline: win_accuracy 22.22%, recovery_rate 70.06%, win_logloss 0.2358, place_logloss 0.4699）
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| baseline（class_change込み） | 22.22% | 70.06% | 0.2358 | 0.4699 |
+| `horse_prior_earnings` 追加後 | 22.28%（+0.06pt） | **71.07%（+1.01pt）** | 0.2358（横ばい） | 0.4695（僅かに改善） |
+
+Log Lossが横ばい・回収率が改善という組み合わせのため、採用基準を満たすとみて walk-forward による正式検証に進んだ。
+
+### Walk-forward（5フォールド）での比較（class_change込みbaseline: win_accuracy 23.81%, recovery_rate 79.20%, win_logloss 0.2252, place_logloss 0.4538）
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| baseline（class_change込み） | 23.81% | 79.20% | 0.2252 | 0.4538 |
+| `horse_prior_earnings` 追加後 | 23.85%（+0.04pt、誤差範囲） | 78.05%（**-1.15pt**） | 0.2251（誤差範囲） | 0.4538（変化なし） |
+
+### 判定
+
+標準splitで見えた回収率+1.01ptの改善はwalk-forwardでは再現せず、-1.15ptと逆方向に振れた。win_accuracy・Log Lossもwalk-forwardでは実質横ばい（変化が0.01〜0.04pt/0.0001で、いずれもフォールド間変動より小さい）。標準splitの回収率改善は単一splitのノイズであり、他の指標も含めて総合的に見ると `horse_prior_earnings` に安定した効果はないと判断する。
+
+累積獲得賞金は近走成績（`avg_finish_last3`等）・調教師/騎手/馬主の勝率系フィーチャーとかなり相関が強く（強い馬ほど賞金を稼ぐ）、既存特徴量で説明できる情報の言い換えになっていた可能性が高い。
+
+### 結論・不採用
+
+コード変更（`_SELECT_COLS`・`_HORSE_PRIOR_EARNINGS_QUERY`・`load_predict_data`・`preprocess()`・`compute_recent_stats()`・`get_feature_columns()`の該当箇所）は revert 済み。
+
+---
+
+## 騎手×馬の組み合わせ成績（`jockey_horse_prior_win_rate`）の追加検討（2026-08-03）
+
+> 計画: [plan/feature-expansion-2026-08.md](./plan/feature-expansion-2026-08.md) バッチ2-2
+> 比較対象は「クラス変化採用後」の現行コード（baseline: win_accuracy 22.22%, recovery_rate 70.06%, win_logloss 0.2358, place_logloss 0.4699）。
+
+特定の馬とその騎手のペア実績（`jockey_horse_prior_win_rate`, `jockey_horse_prior_mounts`）を、既存の調教師・騎手・馬主の全期間累積勝率フィーチャーと同じ日付単位シフト方式で追加（`(horse_id, jockey_id)` の複合キー）。predict時は `_JOCKEY_HORSE_PRIOR_QUERY` で対応。
+
+### 標準 train/val/test split での比較（`train --no-walkforward`）
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| baseline（class_change込み） | 22.22% | 70.06% | 0.2358 | 0.4699 |
+| `jockey_horse_prior_*` 追加後 | 21.98%（-0.24pt） | 69.44%（-0.62pt） | 0.2361（悪化） | 0.4699（変化なし） |
+
+### 判定
+
+全指標が横ばい〜悪化で、改善した指標が一つもない。採用基準（Log Loss改善または横ばい かつ 回収率改善）を満たさないため、walk-forward検証には進めずこの時点で不採用と判断した。
+
+競走馬とジョッキーの組み合わせは大半が1〜数回しか出現せず（同一馬×同一騎手の再騎乗自体が稀）、サンプル数不足で学習ノイズになった可能性が高い。
+
+### 結論・不採用
+
+コード変更（`_JOCKEY_HORSE_PRIOR_QUERY`・`load_predict_data`・`preprocess()`・`compute_recent_stats()`・`get_feature_columns()`の該当箇所）は revert 済み。
+
+---
+
+## レース内ペース予想（`corner_style_race_rank`/`race_leader_count`）の追加検討（2026-08-03）
+
+> 計画: [plan/feature-expansion-2026-08.md](./plan/feature-expansion-2026-08.md) バッチ3-1
+> 比較対象は「クラス変化採用後」の現行コード（baseline: win_accuracy 22.22%, recovery_rate 70.06%, win_logloss 0.2358, place_logloss 0.4699）。
+
+既存の `avg_corner_last3`（馬ごとの直近3走の平均先行指数、shift(1)ベースで情報リーク済みなし）をレース単位で二次集計し、(1) `corner_style_race_rank`: レース内でこの馬が何番目に先行タイプか（順位1=最も先行）、(2) `race_leader_count`: `avg_corner_last3 <= 5.0` の馬の頭数（レース内の先行馬密度、同一レースの全馬で同じ値）を追加。`avg_corner_last3` 自体がリーク対策済みのため、それをレース内で集計するだけの本特徴量にも新たなリークは生じない。
+
+### 標準 train/val/test split での比較（`train --no-walkforward`）
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| baseline（class_change込み） | 22.22% | 70.06% | 0.2358 | 0.4699 |
+| 追加後 | 22.32%（+0.10pt） | 70.16%（+0.10pt） | 0.2360（+0.0002、僅かに悪化） | **0.4685（-0.0014、改善）** |
+
+win_logloss がわずかに悪化する一方 place_logloss は明確に改善という混在した結果だったため、walk-forwardで正式検証した。
+
+### Walk-forward（5フォールド）での比較（baseline: win_accuracy 23.81%, recovery_rate 79.20%, win_logloss 0.2252, place_logloss 0.4538）
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| baseline（class_change込み） | 23.81% | 79.20% | 0.2252 | 0.4538 |
+| 追加後 | 23.90%（+0.09pt） | 78.96%（-0.24pt、誤差範囲） | 0.2252（変化なし） | **0.4527（-0.0011、改善）** |
+
+### 判定
+
+`place_logloss` の改善が標準split（-0.0014）とwalk-forward（-0.0011）で方向・大きさともに一貫しており、単発のノイズでなく再現性のある効果と判断できる（`horse_prior_earnings` は単一splitの改善がwalk-forwardで逆転しており対照的）。win_accuracyもわずかながら両方で改善、win_logloss・recovery_rateは実質横ばい（悪化した指標なし）。**採用してよいと判断。**
+
+### 結論・採用
+
+`corner_style_race_rank`, `race_leader_count` を `get_feature_columns()` に採用済み（非破壊的追加、既存特徴量は変更なし）。
+
+---
+
+## 重賞実績フラグ（`graded_win_prior_flag`/`graded_placed_prior_flag`）の追加検討（2026-08-03）
+
+> 計画: [plan/feature-expansion-2026-08.md](./plan/feature-expansion-2026-08.md) バッチ3-3
+> 比較対象は「クラス変化・レース内ペース予想採用後」の現行コード（baseline: win_accuracy 22.32%, recovery_rate 70.16%, win_logloss 0.2360, place_logloss 0.4685）。
+
+過去にG1/G2/G3で勝利・連対（3着以内）した経験の有無をフラグ化。`races.grade` は常にNULL（スクレイパーが未収集）のため、`preprocess()` の grade補完と同じ `race_name` の `(GI)/(GII)/(GIII)` 正規表現抽出をSQL側でも再現して判定した。
+
+### 標準 train/val/test split での比較（`train --no-walkforward`）
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| baseline（ペース予想込み） | 22.32% | 70.16% | 0.2360 | 0.4685 |
+| `graded_*_prior_flag` 追加後 | 22.06%（-0.26pt） | 68.95%（-1.21pt） | 0.2359（変化なし） | 0.4693（+0.0008、悪化） |
+
+### 判定
+
+改善した指標が一つもなく、win_accuracy・recovery_rate・place_loglossが揃って悪化した。採用基準を満たさないため、walk-forward検証には進めずこの時点で不採用と判断した。
+
+重賞勝利・連対経験は、既存の `avg_finish_last3` 等の近走成績や `class_level`（クラス変化で採用済み）とかなり重複する情報（重賞に出走・好走できる馬は総じてクラスが高い）であり、二値フラグ化したことで既存の連続値特徴量より粗い情報になり、ノイズとして働いた可能性がある。
+
+### 結論・不採用
+
+コード変更（`_GRADED_RESULTS_QUERY`・`load_predict_data`・`preprocess()`・`compute_recent_stats()`・`get_feature_columns()`の該当箇所）は revert 済み。
+
+---
+
+## タイム偏差値（スピード指数、`avg_speed_index_last3`/`avg_speed_index_last5`）の追加検討（2026-08-03）
+
+> 計画: [plan/feature-expansion-2026-08.md](./plan/feature-expansion-2026-08.md) バッチ3-2
+> 比較対象は「クラス変化・レース内ペース予想採用後」の現行コード（baseline: win_accuracy 22.32%, recovery_rate 70.16%, win_logloss 0.2360, place_logloss 0.4685）。
+
+`finish_time`（タイム）をレース内でz-score化した `race_time_zscore`（正値=そのレースの平均より速い、`avg_last3f_rank_last3` と同じ「レース内相対値を計算してから馬ごとに直近走を平均する」パターン）を追加し、直近3走・5走平均を `avg_speed_index_last3`/`avg_speed_index_last5` として特徴量化。既存の `avg_finish_last3`（着順ベース）は同着順でも僅差か大差かを区別できないが、本特徴量はタイム差（マージン）を連続値で捉える。predict時は `_RECENT_STATS_QUERY` に `race_time_z` CTE（`race_last3f` と同型: horse_id フィルタなしで全レースの時間分布からレース単位のz-scoreを計算してから `history` にJOIN）を追加。`races.grade` が常にNULLと判明した際と同様、`finish_time`（`"1:33.4"` 形式）の秒換算をSQLでも `_parse_finish_time` と同じロジックで再現した。
+
+### 標準 train/val/test split での比較（`train --no-walkforward`）
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| baseline（ペース予想込み） | 22.32% | 70.16% | 0.2360 | 0.4685 |
+| 追加後 | **22.79%（+0.47pt）** | **71.18%（+1.02pt）** | **0.2345（-0.0015、改善）** | **0.4668（-0.0017、改善）** |
+
+4指標すべてが明確に改善（本日の実験の中で最大の改善幅）。walk-forwardで正式検証した。
+
+### Walk-forward（5フォールド）での比較（baseline: win_accuracy 23.90%, recovery_rate 78.96%, win_logloss 0.2252, place_logloss 0.4527）
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| baseline（ペース予想込み） | 23.90% | 78.96% | 0.2252 | 0.4527 |
+| 追加後 | 23.95%（+0.05pt） | **79.73%（+0.77pt）** | **0.2245（-0.0007、改善）** | **0.4510（-0.0017、改善）** |
+
+### 判定
+
+標準split・walk-forwardのいずれも4指標全てが改善または横ばいで、悪化した指標が一つもない。当初「正規化基準の設計が難しく実装コストが高い」と位置付けていた項目だが、レース内z-score化（他レースとの絶対比較を避け、同一レース内の他馬とのタイム差のみを使う設計）によって馬場差・距離差の正規化問題を回避でき、実装・効果の両面で成功した。**明確に採用。**
+
+### 結論・採用
+
+`avg_speed_index_last3`, `avg_speed_index_last5` を `get_feature_columns()` に採用済み（非破壊的追加、既存特徴量は変更なし）。同コース種別・同距離条件版（`_cond`）への拡張は次の余地として残る。
+
+---
+
+## 不採用候補全部乗せの検証（2026-08-03）
+
+> 発端: ユーザーから「不採用になったものも含めて一気に全部オンにして評価したら相互作用で改善したりしないか」との質問。バッチ1〜3で不採用と判定した5案（出走間隔・馬場状態別適性統計・累積獲得賞金・騎手×馬コンビ・重賞実績フラグ。血統は未実装のため対象外）を、採用済み3特徴量（クラス変化・レース内ペース予想・スピード指数）の上にまとめて再実装し、単一splitで比較した（診断目的のみ、採否判断のためではない）。
+
+### 標準 train/val/test split での比較（baseline: win_accuracy 22.79%, recovery_rate 71.18%, win_logloss 0.2345, place_logloss 0.4668）
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| baseline（採用済み3特徴量） | 22.79% | 71.18% | 0.2345 | 0.4668 |
+| 不採用5案を全部追加 | 22.63%（-0.16pt） | 69.71%（-1.47pt） | 0.2345（変化なし） | 0.4666（僅かに改善、誤差範囲） |
+
+### 判定
+
+相互作用による改善は見られなかった。win_accuracy・recovery_rateは悪化し、Log Lossはほぼ横ばい。個別テストで観測された「回収率が下がる」傾向がそのまま合算された形で、組み合わせによって新しい情報が生まれた形跡はない。不採用の主因は「既存特徴量との情報の重複」であり、複数の重複特徴量を足しても新規シグナルは増えず、モデルの複雑さだけが増すという解釈と整合する。
+
+検証用に追加したコードは診断後に revert 済み（採用済み3特徴量の状態に復元、テスト・lintで復元を確認）。
+
+---
+
+## 出走間隔（`days_since_last_race`）の再検証（2026-08-03、採用済み特徴量群の上で再テスト）
+
+> 発端: [出走間隔の当初検証](#出走間隔days_since_last_race特徴量の追加検討2026-08-03)（バッチ1-1、朝実施）は標準splitの回収率悪化（-1.81pt）のみで不採用と判断し、walk-forward検証を行わなかった。ユーザーから「Log Lossが悪化していないなら残してもいいのでは」と指摘があり、これを受けて `class_change`・レース内ペース予想・スピード指数の3つを採用した**現在の特徴量セットの上で**再検証した。
+>
+> なお同時に「不採用5案を全部乗せたら相互作用で改善しないか」も検証しており（[全乗せ検証](#不採用候補全部乗せの検証2026-08-03)参照、結果は悪化）、本セクションはその中から出走間隔1つだけを切り出して正式な walk-forward 検証を行ったもの。
+
+### 標準 train/val/test split での比較（baseline: win_accuracy 22.79%, recovery_rate 71.18%, win_logloss 0.2345, place_logloss 0.4668）
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| baseline（採用済み3特徴量） | 22.79% | 71.18% | 0.2345 | 0.4668 |
+| `days_since_last_race` 追加後 | 22.71%（-0.08pt） | 71.08%（-0.10pt） | 0.2345（変化なし） | 0.4668（変化なし） |
+
+朝の初回検証（-1.81pt悪化）とは異なり、今回は回収率の差がほぼ誤差レベルまで縮小した。既存特徴量セットが変わったことで本特徴量の限界的な寄与が変化した可能性がある。Log Lossが完全に横ばいだったため、walk-forwardで正式検証した。
+
+### Walk-forward（5フォールド）での比較（baseline: win_accuracy 23.95%, recovery_rate 79.73%, win_logloss 0.2245, place_logloss 0.4510）
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| baseline（採用済み3特徴量） | 23.95% | 79.73% | 0.2245 | 0.4510 |
+| `days_since_last_race` 追加後 | **24.35%（+0.40pt）** | **80.08%（+0.35pt）** | **0.2242（改善）** | **0.4504（改善）** |
+
+### 判定
+
+4指標すべてが改善。朝の単一split検証だけで不採用と判断したのは早計だった。既存特徴量セット（特にクラス変化・スピード指数）が加わったことで、休養明け/連闘という情報が近走成績とより独立した形でモデルに寄与するようになった可能性がある。**採用。**
+
+### 結論・採用
+
+`days_since_last_race` を `get_feature_columns()` に採用済み（非破壊的追加）。バッチ1-1の当初判定（不採用）は本結果により上書きされる。
+
+---
+
+## 新規候補4案の個別検証（2026-08-03）
+
+> 発端: 全部乗せ検証（不採用5案・新規4案とも）の結果が混在していたため、新規4案を1つずつ個別に検証した。比較対象は「クラス変化・レース内ペース予想・スピード指数・出走間隔」採用後のbaseline（win_accuracy 22.71%, recovery_rate 71.08%, win_logloss 0.2345, place_logloss 0.4668）。
+
+| 候補 | win_accuracy | recovery_rate | win_logloss | place_logloss | 判定 |
+|---|---|---|---|---|---|
+| 厩舎の複数出走頭数（`trainer_multi_entry_count`） | -0.13pt | -0.99pt | -0.0003（改善） | -0.0004（改善） | 不採用 |
+| 頭数正規化した近走成績（`avg_finish_pct_last3/5`） | -0.28pt | -2.30pt | +0.0003（悪化） | +0.0001（悪化） | 不採用 |
+| 斤量の自己比較（`weight_carried_vs_avg3`） | -0.23pt | -1.54pt | +0.0001（悪化） | -0.0003（改善） | 不採用 |
+| 騎手の直近30走勝率（`jockey_win_rate_last30`） | -0.13pt | -1.82pt | -0.0001（改善） | -0.0003（改善） | 不採用 |
+
+### 判定
+
+4案とも同じパターン: Log Lossの変化はノイズレベル（±0.0001〜0.0004、本日の「明確な信号」判定の閾値0.0007を下回る）で、win_accuracy・recovery_rateは軒並み悪化。改善したwalk-forward経由の`class_change`・スピード指数・出走間隔のケース（Log Lossが0.0007〜0.0026という明確な幅で改善していた）とは対照的。**4案とも採用基準を満たさず、walk-forward検証は行わずこの時点で不採用と判断した。**
+
+いずれも既存特徴量（`avg_finish_last3`, `weight_carried_relative`, `jockey_win_rate_venue_cond`/`jockey_prior_win_rate` 等）と情報が重複しやすい設計だったことが共通点。「頭数正規化」「自己比較」「短期フォーム」という発想自体は妥当だが、この特徴量セットでは新規情報を追加できなかった。
+
+### 結論・不採用
+
+4案ともコード変更をrevert済み（採用済み4特徴量の状態に復元、テスト・lintで復元を確認）。
+
+---
+
+## 通算出走数（`career_starts_prior`）の追加検討（2026-08-03）
+
+> 発端: 新規4案（バッチ4）が全て不採用だった後、「既存特徴量と重複しない新しい軸」として、成績ではなく経験値（キャリア通算出走数）を特徴量化できないか検討した。
+> 比較対象は現行baseline（win_accuracy 22.71%, recovery_rate 71.08%, win_logloss 0.2345, place_logloss 0.4668）。
+
+その馬が当該レースより前に何戦してきたか（`groupby("horse_id").cumcount()`、デビュー戦=0）を追加。年齢が同じでも出走数が違えば「早熟で使われてきた馬」と「じっくり使われてきた馬」を区別できるという仮説。
+
+### 標準 train/val/test split での比較（`train --no-walkforward`）
+
+| | win_accuracy | recovery_rate | win_logloss | place_logloss |
+|---|---|---|---|---|
+| baseline（採用済み4特徴量） | 22.71% | 71.08% | 0.2345 | 0.4668 |
+| `career_starts_prior` 追加後 | 22.61%（-0.10pt） | 70.50%（-0.58pt） | 0.2346（+0.0001、悪化） | 0.4667（-0.0001、改善） |
+
+### 判定
+
+Log Lossの変化はどちらも±0.0001でノイズレベル、win_accuracy・recovery_rateはともに悪化。バッチ4の4案と同じパターンで、採用基準（Log Lossの明確な改善）を満たさない。既存の `age`・近走成績系フィーチャーと組み合わせれば同等の情報がすでにモデルから引き出せていた可能性が高い。
+
+### 結論・不採用
+
+コード変更（`_CAREER_STARTS_QUERY`・`load_predict_data`・`preprocess()`・`compute_recent_stats()`・`get_feature_columns()`の該当箇所）は revert 済み。

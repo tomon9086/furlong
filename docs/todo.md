@@ -54,6 +54,23 @@
 - [ ] `race.betting`（軸）が top1 の人気帯フィルタで抑制される頻度を過去データで定量化する（top1 が7番人気以下になるレースの割合）
 - [x] `race.betting`（軸）を spec.md 上で「参考・未検証」として明示（実行時出力への反映は見送り。理由: betting.toml自体への反映はoutput.py修正が必要で、spec.mdだけの修正は開発側の保険に留まり実運用の見え方は変わらない点を確認した上で、今回はspec.mdのみで良いと判断）
 
+## 特徴量拡張（バッチ検証）
+
+> 計画: [plan/feature-expansion-2026-08.md](./plan/feature-expansion-2026-08.md)
+> 各案は `train --no-walkforward` で baseline と比較 → 有望なものだけ walk-forward bootstrap CI で正式検証、というバッチ運用。
+
+- [x] バッチ1-1: 出走間隔（`days_since_last_race`）— 初回不採用だったが、他特徴量採用後に再検証し採用に切り替え（walk-forwardで4指標全て改善。`spec.md` 反映済み）
+- [x] バッチ1-2: 馬場状態別の適性統計（`*_trackcond`）— 検証済み・不採用（回収率悪化、Log Loss横ばい）
+- [x] バッチ1-3: クラス（格）変化（`class_level`/`class_change`）— 検証済み・採用（`spec.md` 反映済み）
+- [x] バッチ2-1: 累積獲得賞金（`horse_prior_earnings`）— 検証済み・不採用（walk-forwardで回収率悪化、標準splitの改善は再現せず）
+- [x] バッチ2-2: 騎手×馬の組み合わせ成績（`jockey_horse_prior_win_rate`）— 検証済み・不採用（全指標が横ばい〜悪化、サンプル不足の疑い）
+- [ ] バッチ2-3: 血統の適性統計化 — 血統データ遡及補完（下記セクション）完了まで保留
+- [x] バッチ3-1: レース内ペース予想（`corner_style_race_rank`/`race_leader_count`）— 検証済み・採用（`spec.md` 反映済み）
+- [x] バッチ3-2: タイム偏差値（スピード指数、`avg_speed_index_last3`）— 検証済み・採用（標準split・walk-forwardとも4指標全て改善、本日最大の効果）
+- [x] バッチ3-3: 重賞実績フラグ（`graded_win_prior_flag`）— 検証済み・不採用（全指標横ばい〜悪化、近走成績・クラス変化と重複の疑い）
+- [x] バッチ4: 新規4案（厩舎複数出走・頭数正規化近走成績・斤量自己比較・騎手直近30走勝率）— 検証済み・全て不採用（Log Lossの変化はノイズレベル、accuracy・recoveryは軒並み悪化。詳細は [experiments.md](./experiments.md) 参照）
+- [x] 通算出走数（`career_starts_prior`）— 検証済み・不採用（同上のパターン）
+
 ## predictor HTTP API
 
 - [x] `furlong-predictor` の `pyproject.toml` に `uvicorn` / `fastapi` 依存を追加
