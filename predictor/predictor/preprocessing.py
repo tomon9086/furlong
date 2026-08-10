@@ -13,6 +13,11 @@ TEST_RATIO = 0.2
 # 較正（バリデーション）データに使う割合
 VAL_RATIO = 0.1
 
+# 血統適性統計（父馬×コース種別）の縮小推定パラメータ。
+# 学習時（compute_recent_stats）と予測時（load_predict_data の SQL）で共通の値を使う。
+_PEDIGREE_K_SHRINK = 20.0  # 複勝率の縮小推定の仮想サンプル数
+_PEDIGREE_K_SPEED_SHRINK = 10.0  # スピード指数の縮小推定の仮想サンプル数（母平均0）
+
 _SELECT_COLS = """
     r.race_id,
     r.race_name,
@@ -306,6 +311,70 @@ FROM payoffs
 WHERE race_id = ANY(%s)
 """
 
+_GLOBAL_PLACE_RATE_QUERY = """
+SELECT AVG(CASE WHEN rr.finishing_position::integer <= 3 THEN 1.0 ELSE 0.0 END) AS global_place_rate
+FROM race_results rr
+JOIN races r ON rr.race_id = r.race_id
+WHERE rr.finishing_position ~ '^[0-9]+$'
+  AND TO_DATE(r.date, 'YYYY/MM/DD') < TO_DATE(%s, 'YYYY/MM/DD')
+"""
+
+_SIRE_PLACE_RATE_QUERY = """
+SELECT
+  h.sire,
+  (SUM(CASE WHEN rr.finishing_position::integer <= 3 THEN 1 ELSE 0 END)::float
+    + %s * %s) / (COUNT(*) + %s) AS sire_place_rate_cond,
+  COUNT(*)::float AS sire_progeny_mounts_cond
+FROM race_results rr
+JOIN races r ON rr.race_id = r.race_id
+JOIN horses h ON rr.horse_id = h.horse_id
+WHERE rr.finishing_position ~ '^[0-9]+$'
+  AND h.sire = ANY(%s)
+  AND r.course_type = %s
+  AND TO_DATE(r.date, 'YYYY/MM/DD') < TO_DATE(%s, 'YYYY/MM/DD')
+GROUP BY h.sire
+"""
+
+_SIRE_SPEED_INDEX_QUERY = """
+WITH race_time_z AS (
+  SELECT
+    race_id,
+    horse_id,
+    CASE WHEN STDDEV(ft) OVER (PARTITION BY race_id) > 0
+      THEN (AVG(ft) OVER (PARTITION BY race_id) - ft)
+        / STDDEV(ft) OVER (PARTITION BY race_id)
+      ELSE NULL
+    END AS race_time_zscore
+  FROM (
+    SELECT
+      race_id,
+      horse_id,
+      CASE
+        WHEN finish_time ~ '^[0-9]+:[0-9]+\\.[0-9]+$'
+          THEN SPLIT_PART(finish_time, ':', 1)::float * 60
+            + SPLIT_PART(finish_time, ':', 2)::float
+        WHEN finish_time ~ '^[0-9]+\\.?[0-9]*$'
+          THEN finish_time::float
+        ELSE NULL
+      END AS ft
+    FROM race_results
+    WHERE finishing_position ~ '^[0-9]+$'
+  ) t
+)
+SELECT
+  h.sire,
+  SUM(rtz.race_time_zscore) / (COUNT(rtz.race_time_zscore) + %s) AS sire_avg_speed_index_cond
+FROM race_results rr
+JOIN races r ON rr.race_id = r.race_id
+JOIN horses h ON rr.horse_id = h.horse_id
+JOIN race_time_z rtz ON rr.race_id = rtz.race_id AND rr.horse_id = rtz.horse_id
+WHERE rr.finishing_position ~ '^[0-9]+$'
+  AND h.sire = ANY(%s)
+  AND r.course_type = %s
+  AND TO_DATE(r.date, 'YYYY/MM/DD') < TO_DATE(%s, 'YYYY/MM/DD')
+GROUP BY h.sire
+"""
+
 _BRACKET_DISTANCE_AVG_QUERY = """
 SELECT
   rr.bracket_number AS bracket_number,
@@ -378,6 +447,7 @@ def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
             jockey_ids = target_df["jockey_id"].dropna().tolist()
             trainer_ids = target_df["trainer_id"].dropna().tolist()
             owners = target_df["owner"].dropna().tolist()
+            sires = target_df["sire"].dropna().tolist()
             venue = target_df["venue"].iloc[0]
             course_type = target_df["course_type"].iloc[0]
             distance = int(target_df["distance"].iloc[0])
@@ -413,6 +483,33 @@ def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
             owner_prior_cols = [desc[0] for desc in cur.description]
             owner_prior_df = pd.DataFrame(owner_prior_rows, columns=owner_prior_cols)
 
+            cur.execute(_GLOBAL_PLACE_RATE_QUERY, (race_date,))
+            global_place_rate = cur.fetchone()[0]
+            global_place_rate = float(global_place_rate) if global_place_rate is not None else 0.0
+
+            cur.execute(
+                _SIRE_PLACE_RATE_QUERY,
+                (
+                    _PEDIGREE_K_SHRINK,
+                    global_place_rate,
+                    _PEDIGREE_K_SHRINK,
+                    sires,
+                    course_type,
+                    race_date,
+                ),
+            )
+            sire_place_rows = cur.fetchall()
+            sire_place_cols = [desc[0] for desc in cur.description]
+            sire_place_df = pd.DataFrame(sire_place_rows, columns=sire_place_cols)
+
+            cur.execute(
+                _SIRE_SPEED_INDEX_QUERY,
+                (_PEDIGREE_K_SPEED_SHRINK, sires, course_type, race_date),
+            )
+            sire_speed_rows = cur.fetchall()
+            sire_speed_cols = [desc[0] for desc in cur.description]
+            sire_speed_df = pd.DataFrame(sire_speed_rows, columns=sire_speed_cols)
+
             cur.execute(_PRE_RACE_ODDS_QUERY, (race_id,))
             pre_odds_rows = cur.fetchall()
             pre_odds_cols = [desc[0] for desc in cur.description]
@@ -424,16 +521,24 @@ def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
             bracket_cols = [desc[0] for desc in cur.description]
             bracket_df = pd.DataFrame(bracket_rows, columns=bracket_cols)
 
-    return (
+    result = (
         target_df.merge(stats_df, on="horse_id", how="left")
         .merge(jockey_df, on="jockey_id", how="left")
         .merge(trainer_df, on="trainer_id", how="left")
         .merge(trainer_prior_df, on="trainer_id", how="left")
         .merge(jockey_prior_df, on="jockey_id", how="left")
         .merge(owner_prior_df, on="owner", how="left")
+        .merge(sire_place_df, on="sire", how="left")
+        .merge(sire_speed_df, on="sire", how="left")
         .merge(pre_odds_df, on="horse_number", how="left")
         .merge(bracket_df, on="bracket_number", how="left")
     )
+    # 産駒実績が0件（=SQLのGROUP BYで該当なし）の場合、学習時の縮小推定が返す値
+    # （mounts=0 → 母平均そのもの）と一致させるため明示的に埋める。
+    result["sire_place_rate_cond"] = result["sire_place_rate_cond"].fillna(global_place_rate)
+    result["sire_progeny_mounts_cond"] = result["sire_progeny_mounts_cond"].fillna(0.0)
+    result["sire_avg_speed_index_cond"] = result["sire_avg_speed_index_cond"].fillna(0.0)
+    return result
 
 
 def _parse_finish_time(value: object) -> float | None:
@@ -592,6 +697,9 @@ def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFra
         "owner_prior_win_rate",
         "owner_prior_mounts",
         "bracket_distance_avg_finish",
+        "sire_place_rate_cond",
+        "sire_progeny_mounts_cond",
+        "sire_avg_speed_index_cond",
     ):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -838,6 +946,75 @@ def compute_recent_stats(df: pd.DataFrame) -> pd.DataFrame:
     )
     df["jockey_win_rate_venue_cond"] = df_jockey["jockey_win_rate_venue_cond"]
 
+    # ── 血統適性統計（複勝率ベース + 縮小推定 + スピード指数） ─────────────────
+    # 2026-08-09の検証で「父馬×コース種別×距離帯の単勝勝率」はbootstrap有意差なし
+    # （win/place_logloss・win_accuracyいずれも95%CIが0を跨ぐ）と判明。単勝は稀事象で
+    # 父馬あたりのサンプルが薄いと高分散になるため、(1) 発生率の高い複勝率に変更し、
+    # (2) 少サンプルの極端値を抑える縮小推定（shrinkage）を追加し、(3) 連続値である
+    # スピード指数（race_time_zscore）ベースの適性指標も別軸として検証する。
+    # 日付単位で集計してから1日分ずらす方式（owner_prior_win_rate と同じ）は、
+    # 同じ父馬の産駒が同一レースに複数出走する場合のリークを防ぐため必須。
+    # 2026-08-10 bootstrap 有意差検定で win_logloss・place_logloss・win_accuracy
+    # すべて有意に改善（95%CIが0を跨がない）を確認し採用。母父馬×馬場状態版は
+    # 単体・組み合わせとも劣ったため不採用（詳細は docs/experiments.md 参照）。
+    _global_place_rate = float(df["is_placed"].mean())
+
+    # パターンD+E: 父馬(sire) × コース種別: 産駒の複勝率（縮小推定）
+    sire_place_daily = (
+        df.groupby(["sire", "course_type", "date"], observed=True)["is_placed"]
+        .agg(_daily_mounts="count", _daily_places="sum")
+        .reset_index()
+        .sort_values(["sire", "course_type", "date"])
+    )
+    _grp_sire_place = sire_place_daily.groupby(["sire", "course_type"], observed=True)
+    sire_place_daily["sire_progeny_mounts_cond"] = (
+        _grp_sire_place["_daily_mounts"].cumsum() - sire_place_daily["_daily_mounts"]
+    ).astype(float)
+    _sire_prior_places = (
+        _grp_sire_place["_daily_places"].cumsum() - sire_place_daily["_daily_places"]
+    ).astype(float)
+    sire_place_daily["sire_place_rate_cond"] = (
+        _sire_prior_places + _PEDIGREE_K_SHRINK * _global_place_rate
+    ) / (sire_place_daily["sire_progeny_mounts_cond"] + _PEDIGREE_K_SHRINK)
+    df = df.merge(
+        sire_place_daily[
+            [
+                "sire",
+                "course_type",
+                "date",
+                "sire_place_rate_cond",
+                "sire_progeny_mounts_cond",
+            ]
+        ],
+        on=["sire", "course_type", "date"],
+        how="left",
+    )
+
+    # パターンF: 父馬(sire) × コース種別: 産駒の平均スピード指数（縮小推定）
+    sire_speed_daily = (
+        df.groupby(["sire", "course_type", "date"], observed=True)["race_time_zscore"]
+        .agg(_daily_count="count", _daily_sum="sum")
+        .reset_index()
+        .sort_values(["sire", "course_type", "date"])
+    )
+    _grp_sire_speed = sire_speed_daily.groupby(["sire", "course_type"], observed=True)
+    _sire_speed_prior_count = (
+        _grp_sire_speed["_daily_count"].cumsum() - sire_speed_daily["_daily_count"]
+    ).astype(float)
+    _sire_speed_prior_sum = (
+        _grp_sire_speed["_daily_sum"].cumsum() - sire_speed_daily["_daily_sum"]
+    ).astype(float)
+    # スピード指数（race_time_zscore）はレース内正規化により母平均が0のため、
+    # 縮小推定は「0点のダミーサンプルをK_SPEED_SHRINK個混ぜる」の単純な形になる。
+    sire_speed_daily["sire_avg_speed_index_cond"] = _sire_speed_prior_sum / (
+        _sire_speed_prior_count + _PEDIGREE_K_SPEED_SHRINK
+    )
+    df = df.merge(
+        sire_speed_daily[["sire", "course_type", "date", "sire_avg_speed_index_cond"]],
+        on=["sire", "course_type", "date"],
+        how="left",
+    )
+
     # ── 調教師: 直近30走勝率 ──────────────────────────────────────────────
     trainer_key = ["trainer_id"]
     df_trainer = df.sort_values(trainer_key + ["date", "race_id"])
@@ -1074,6 +1251,10 @@ def get_feature_columns(extra_columns: list[str] | None = None) -> list[str]:
         "sire",
         "dam",
         "broodmare_sire",
+        # 血統適性統計（父馬×コース種別の産駒複勝率・平均スピード指数、縮小推定）
+        "sire_place_rate_cond",
+        "sire_progeny_mounts_cond",
+        "sire_avg_speed_index_cond",
         # 騎手統計
         "jockey_win_rate_venue_cond",
         "jockey_prior_win_rate",

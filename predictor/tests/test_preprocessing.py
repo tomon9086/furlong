@@ -580,6 +580,240 @@ class TestComputeRecentStats:
         assert h0_r4["owner_prior_win_rate"].iloc[0] == pytest.approx(1.0)
         assert h0_r4["owner_prior_mounts"].iloc[0] == pytest.approx(4.0)
 
+    def test_sire_place_rate_cond_zero_mounts_equals_global_mean(self):
+        """縮小推定は0走時点でも NaN にならず、全体複勝率に一致すること。"""
+        raw = _make_multi_race_raw_df()
+        df = preprocess(raw)
+        result = compute_recent_stats(df)
+        global_place_rate = df["is_placed"].mean()
+        first_races = result[result["race_id"] == "R0"]
+        assert first_races["sire_progeny_mounts_cond"].eq(0.0).all()
+        np.testing.assert_allclose(
+            first_races["sire_place_rate_cond"].to_numpy(dtype=float),
+            global_place_rate,
+            atol=1e-9,
+        )
+
+    def test_sire_place_rate_cond_shrinks_small_sample_toward_global_mean(self):
+        """父馬あたりのサンプルが少ない場合、実測複勝率より全体複勝率寄りの値になること。"""
+        rows = []
+        # SireA: 3レース連続で1着（複勝）する馬3頭（サンプル数が多く母平均を押し上げる）
+        for i in range(3):
+            rows.append(
+                {
+                    "race_id": f"RA{i}",
+                    "date": f"2024/01/0{i + 1}",
+                    "venue": "東京",
+                    "course_type": "芝",
+                    "distance": "1600",
+                    "direction": "右",
+                    "weather": "晴",
+                    "track_condition": "良",
+                    "grade": "G1",
+                    "head_count": 10,
+                    "horse_number": "1",
+                    "finishing_position": "1",
+                    "bracket_number": "1",
+                    "horse_id": f"HA{i}",
+                    "horse_name": f"HorseA{i}",
+                    "sex_age": "牡4",
+                    "weight_carried": "57.0",
+                    "jockey_id": f"JA{i}",
+                    "jockey_name": f"JockeyA{i}",
+                    "finish_time": "1:33.4",
+                    "passing_order": "01-01-01-01",
+                    "last_3f": "34.5",
+                    "odds": "5.2",
+                    "popularity": "2",
+                    "horse_weight": "480",
+                    "horse_weight_diff": "0",
+                    "trainer_id": f"TA{i}",
+                    "owner": f"OA{i}",
+                    "sire": "SireA",
+                    "dam": "DamA",
+                    "broodmare_sire": "BMSA",
+                }
+            )
+        # SireB: 5着（非複勝）が2走続く馬2頭（サンプル数が少ない）
+        for i in range(2):
+            rows.append(
+                {
+                    "race_id": f"RB{i}",
+                    "date": f"2024/01/{i + 4:02d}",
+                    "venue": "東京",
+                    "course_type": "芝",
+                    "distance": "1600",
+                    "direction": "右",
+                    "weather": "晴",
+                    "track_condition": "良",
+                    "grade": "G1",
+                    "head_count": 10,
+                    "horse_number": "1",
+                    "finishing_position": "5",
+                    "bracket_number": "1",
+                    "horse_id": f"HB{i}",
+                    "horse_name": f"HorseB{i}",
+                    "sex_age": "牡4",
+                    "weight_carried": "57.0",
+                    "jockey_id": f"JB{i}",
+                    "jockey_name": f"JockeyB{i}",
+                    "finish_time": "1:35.4",
+                    "passing_order": "05-05-05-05",
+                    "last_3f": "36.5",
+                    "odds": "20.0",
+                    "popularity": "6",
+                    "horse_weight": "480",
+                    "horse_weight_diff": "0",
+                    "trainer_id": f"TB{i}",
+                    "owner": f"OB{i}",
+                    "sire": "SireB",
+                    "dam": "DamB",
+                    "broodmare_sire": "BMSB",
+                }
+            )
+        raw = pd.DataFrame(rows)
+        df = preprocess(raw)
+        result = compute_recent_stats(df)
+
+        global_place_rate = df["is_placed"].mean()
+        # SireB の2走目（RB1）: 直前情報は RB0 の1走のみ（非複勝）→ 実測複勝率は0.0
+        hb1 = result[result["horse_id"] == "HB1"]
+        assert hb1["sire_progeny_mounts_cond"].iloc[0] == pytest.approx(1.0)
+        shrunk_rate = hb1["sire_place_rate_cond"].iloc[0]
+        # 縮小推定は「実測0.0」と「全体複勝率」の間に位置するはず（0に張り付かない）
+        assert 0.0 < shrunk_rate < global_place_rate
+
+    def test_sire_avg_speed_index_cond_zero_mounts_is_zero(self):
+        """スピード指数の縮小推定は0走時点で0（レース内z-scoreの母平均）になること。"""
+        df = preprocess(_make_multi_race_raw_df())
+        result = compute_recent_stats(df)
+        first_races = result[result["race_id"] == "R0"]
+        assert first_races["sire_avg_speed_index_cond"].eq(0.0).all()
+
+    def test_sire_avg_speed_index_cond_reflects_past_speed(self):
+        """過去に速いタイムで走った産駒が多い父馬ほどスピード指数が高くなること。
+
+        レース内z-scoreは同一レースの全頭で合計すると必ず0になるため、対象の父馬が
+        レース内の「全頭」を占めるフィクスチャだと相殺してテストにならない（自分自身の
+        速い実績と遅い実績が打ち消し合う）。ここでは対象の父馬の産駒は一部の頭数のみに
+        留め、残りは別の父馬にすることで相殺を避ける。
+        """
+        rows = [
+            {
+                "race_id": "R0",
+                "date": "2024/01/01",
+                "venue": "東京",
+                "course_type": "芝",
+                "distance": "1600",
+                "direction": "右",
+                "weather": "晴",
+                "track_condition": "良",
+                "grade": "G1",
+                "head_count": 3,
+                "horse_number": str(i + 1),
+                "finishing_position": str(i + 1),
+                "bracket_number": str(i + 1),
+                "horse_id": f"H{i}",
+                "horse_name": f"Horse{i}",
+                "sex_age": "牡4",
+                "weight_carried": "57.0",
+                "jockey_id": f"J{i}",
+                "jockey_name": f"Jockey{i}",
+                "finish_time": finish_time,
+                "passing_order": "01-01-01-01",
+                "last_3f": "34.5",
+                "odds": "5.2",
+                "popularity": "2",
+                "horse_weight": "480",
+                "horse_weight_diff": "0",
+                "trainer_id": f"T{i}",
+                "owner": f"O{i}",
+                # H0/H1 は対象の父馬、H2 は別の父馬（相殺を避けるため）
+                "sire": "TargetSire" if i < 2 else "OtherSire",
+                "dam": "Dam",
+                "broodmare_sire": "BMS",
+            }
+            for i, finish_time in enumerate(["1:33.0", "1:34.0", "1:37.0"])
+        ]
+        rows.append(
+            {
+                "race_id": "R1",
+                "date": "2024/01/02",
+                "venue": "東京",
+                "course_type": "芝",
+                "distance": "1600",
+                "direction": "右",
+                "weather": "晴",
+                "track_condition": "良",
+                "grade": "G1",
+                "head_count": 2,
+                "horse_number": "1",
+                "finishing_position": "1",
+                "bracket_number": "1",
+                "horse_id": "H3",
+                "horse_name": "Horse3",
+                "sex_age": "牡4",
+                "weight_carried": "57.0",
+                "jockey_id": "J3",
+                "jockey_name": "Jockey3",
+                "finish_time": "1:33.4",
+                "passing_order": "01-01-01-01",
+                "last_3f": "34.5",
+                "odds": "5.2",
+                "popularity": "2",
+                "horse_weight": "480",
+                "horse_weight_diff": "0",
+                "trainer_id": "T3",
+                "owner": "O3",
+                "sire": "TargetSire",
+                "dam": "Dam",
+                "broodmare_sire": "BMS",
+            }
+        )
+        # R1 に2頭目を追加（レース内z-score計算にはstd>0となるよう2頭以上必要）
+        rows.append(
+            {
+                "race_id": "R1",
+                "date": "2024/01/02",
+                "venue": "東京",
+                "course_type": "芝",
+                "distance": "1600",
+                "direction": "右",
+                "weather": "晴",
+                "track_condition": "良",
+                "grade": "G1",
+                "head_count": 2,
+                "horse_number": "2",
+                "finishing_position": "2",
+                "bracket_number": "2",
+                "horse_id": "H4",
+                "horse_name": "Horse4",
+                "sex_age": "牡4",
+                "weight_carried": "57.0",
+                "jockey_id": "J4",
+                "jockey_name": "Jockey4",
+                "finish_time": "1:34.4",
+                "passing_order": "02-02-02-02",
+                "last_3f": "35.5",
+                "odds": "8.0",
+                "popularity": "3",
+                "horse_weight": "480",
+                "horse_weight_diff": "0",
+                "trainer_id": "T4",
+                "owner": "O4",
+                "sire": "OtherSire2",
+                "dam": "Dam",
+                "broodmare_sire": "BMS",
+            }
+        )
+        raw = pd.DataFrame(rows)
+        df = preprocess(raw)
+        result = compute_recent_stats(df)
+        # TargetSire の産駒は R0 で H0(最速)・H1(2番目)、H2(最遅)は別の父馬。
+        # H0+H1 のレース内z-scoreの合計は正（H2側に押し出される）になるはず。
+        h3_r1 = result[result["horse_id"] == "H3"]
+        assert h3_r1["sire_avg_speed_index_cond"].iloc[0] > 0.0
+
 
 # ──────────────────────────────────────────────
 # compute_time_decay_weight

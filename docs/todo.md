@@ -41,7 +41,7 @@
 > `parsers/horse.py` の `parse_pedigree`／`_parse_blood_table`）。(2) 1995〜2006年の馬
 > （約87,000頭）はプロフィールページ自体が未取得のまま → 未着手（下記）。
 
-- [ ] 1995〜2006年の馬（`race_results.horse_id` にはあるが `horses` に存在しない約87,000頭）を `scraper.backfill_missing --horses-only` で遡及スクレイピングする。件数が多く対netkeibaリクエストが長時間・大量になるため、実行タイミング（負荷・レート制限への配慮）を検討してから着手する
+- [x] 1995〜2006年の馬（`race_results.horse_id` にはあるが `horses` に存在しない約87,000頭）を `scraper.backfill_missing --horses-only` で遡及スクレイピングする。件数が多く対netkeibaリクエストが長時間・大量になるため、実行タイミング（負荷・レート制限への配慮）を検討してから着手する — 2026-08-09完了。`horses.sire`/`dam`/`broodmare_sire` 全132,856頭で充足確認済み（[[project_pedigree_backfill_status]]）
 - [ ] 遡及補完後、sire/dam/broodmare_sire の feature importance が古い期間の walk-forward フォールドでも安定するか再確認する
 
 ## 堅実・大穴戦略の軸重複解消
@@ -64,7 +64,7 @@
 - [x] バッチ1-3: クラス（格）変化（`class_level`/`class_change`）— 検証済み・採用（`spec.md` 反映済み）
 - [x] バッチ2-1: 累積獲得賞金（`horse_prior_earnings`）— 検証済み・不採用（walk-forwardで回収率悪化、標準splitの改善は再現せず）
 - [x] バッチ2-2: 騎手×馬の組み合わせ成績（`jockey_horse_prior_win_rate`）— 検証済み・不採用（全指標が横ばい〜悪化、サンプル不足の疑い）
-- [ ] バッチ2-3: 血統の適性統計化 — 血統データ遡及補完（下記セクション）完了まで保留
+- [x] バッチ2-3: 血統の適性統計化 — 単勝勝率ベースの初回検証は不採用（ペアード・ブートストラップで有意差なし）。複勝率＋縮小推定＋スピード指数に再設計して再検証したところ、walk-forward・正式有意差検定（95%CI）とも win_logloss・place_logloss・win_accuracy すべてで有意な改善を確認し採用（`sire_place_rate_cond`/`sire_progeny_mounts_cond`/`sire_avg_speed_index_cond`）。`spec.md` 反映済み。詳細は [experiments.md](./experiments.md) 参照
 - [x] バッチ3-1: レース内ペース予想（`corner_style_race_rank`/`race_leader_count`）— 検証済み・採用（`spec.md` 反映済み）
 - [x] バッチ3-2: タイム偏差値（スピード指数、`avg_speed_index_last3`）— 検証済み・採用（標準split・walk-forwardとも4指標全て改善、本日最大の効果）
 - [x] バッチ3-3: 重賞実績フラグ（`graded_win_prior_flag`）— 検証済み・不採用（全指標横ばい〜悪化、近走成績・クラス変化と重複の疑い）
