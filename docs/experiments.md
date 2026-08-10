@@ -34,3 +34,5 @@
 | 2026-08-03 | 通算出走数フィーチャー追加 | Rejected | [ADR-0026](./adr/0026-career-starts-rejected.md) |
 | 2026-08-09 | 血統適性統計（単勝勝率ベース） | Superseded by ADR-0028 | [ADR-0027](./adr/0027-pedigree-affinity-win-rate-rejected.md) |
 | 2026-08-10 | 血統適性統計（複勝率＋縮小推定＋スピード指数、再設計） | Accepted, Supersedes ADR-0027 | [ADR-0028](./adr/0028-pedigree-affinity-place-rate-shrinkage-accepted.md) |
+| 2026-08-10 | MC組合せ馬券展開のフェーズ2ゲート再検証（現行モデルでも単勝EV回収率100%未達） | Rejected | [ADR-0029](./adr/0029-mc-win-ev-gate-recheck-2026-08-rejected.md) |
+| 2026-08-10 | `dam`フィーチャー除外（permutation importance検定で有意な寄与なしと判明） | Accepted | [ADR-0030](./adr/0030-dam-feature-removed.md) |

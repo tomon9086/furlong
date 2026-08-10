@@ -44,6 +44,11 @@ def _run_wf_fold(args: tuple) -> dict:
     wf_pred = _model.predict(wf_calibrated, wf_test)
     wf_metrics = evaluation.evaluate(wf_test, wf_pred)
 
+    pedigree_importance = evaluation.pedigree_permutation_importance_ci(
+        wf_calibrated, wf_test, n_repeats=20, random_state=fold_idx
+    )
+    pedigree_importance["fold"] = fold_idx
+
     fold_payoffs = wf_payoffs[wf_payoffs["race_id"].isin(wf_test["race_id"])]
     bet_record_frames = []
     for bet_type in ("馬連", "三連複", "ワイド"):
@@ -63,6 +68,7 @@ def _run_wf_fold(args: tuple) -> dict:
         "test_end": wf_test["date"].max(),
         **wf_metrics,
         "_bet_records": bet_records,
+        "_pedigree_importance": pedigree_importance,
     }
 
 
@@ -356,9 +362,22 @@ def train_mode(
         all_bet_records = pd.concat(
             [r.pop("_bet_records") for r in fold_results], ignore_index=True
         )
+        all_pedigree_importance = pd.concat(
+            [r.pop("_pedigree_importance") for r in fold_results], ignore_index=True
+        )
 
         wf_summary = evaluation.walk_forward_summary(fold_results)
         logger.info(wf_summary.to_string())
+
+        logger.info(
+            "--- 血統フィーチャー permutation importance（fold別, "
+            "log-loss悪化幅の95%CI, CI下限>0で有意）---"
+        )
+        pedigree_sig = all_pedigree_importance.pivot_table(
+            index=["feature", "model"], columns="fold", values="significant"
+        )
+        logger.info(pedigree_sig.to_string())
+        logger.info(all_pedigree_importance.to_string(index=False))
 
         logger.info(
             "--- Walk-forward プール後 Bootstrap CI（馬連・三連複・ワイド, "

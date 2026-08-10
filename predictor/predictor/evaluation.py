@@ -1622,3 +1622,277 @@ def mc_ev_filter_analysis(
         columns={"mc_win_prob": "win_prob"}
     )
     return ev_filter_analysis(test_df, pred_mc, thresholds=thresholds)
+
+
+_PEDIGREE_FEATURES = (
+    "sire",
+    "dam",
+    "broodmare_sire",
+    "sire_place_rate_cond",
+    "sire_progeny_mounts_cond",
+    "sire_avg_speed_index_cond",
+)
+
+
+def pedigree_feature_importance_rank(models) -> pd.DataFrame:
+    """血統フィーチャーの feature importance（gain）と全フィーチャー中の順位を返す。
+
+    遡及補完前の期間で血統情報が欠落していた影響が、walk-forward の古いフォールドでも
+    解消されているかを確認するための診断用。
+
+    Parameters
+    ----------
+    models : predictor.model.Models | predictor.calibration.CalibratedModels
+        ``win``/``place`` の lgb.Booster を持つオブジェクト。
+
+    Returns
+    -------
+    pd.DataFrame
+        columns: feature, model（win/place）, gain, rank（gain 降順、1始まり）
+    """
+    rows = []
+    for model_name in ("win", "place"):
+        booster = getattr(models, model_name)
+        feature_names = booster.feature_name()
+        gains = booster.feature_importance(importance_type="gain")
+        order = pd.Series(gains, index=feature_names).rank(
+            ascending=False, method="min"
+        )
+        for feature in _PEDIGREE_FEATURES:
+            if feature not in feature_names:
+                continue
+            idx = feature_names.index(feature)
+            rows.append(
+                {
+                    "feature": feature,
+                    "model": model_name,
+                    "gain": gains[idx],
+                    "rank": int(order[feature]),
+                    "n_features": len(feature_names),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def pedigree_permutation_importance_ci(
+    calibrated_models,
+    test_df: pd.DataFrame,
+    features: tuple[str, ...] | None = None,
+    n_repeats: int = 20,
+    ci: float = 0.95,
+    random_state: int | None = None,
+) -> pd.DataFrame:
+    """血統フィーチャーの permutation importance を信頼区間付きで検定する。
+
+    フィーチャーの値をシャッフルして再予測し、log-loss の悪化幅を ``n_repeats``
+    回繰り返して分布を取る。悪化幅の bootstrap 信頼区間の下限が 0 を上回れば、
+    そのフィーチャーが統計的に有意にモデルへ寄与していると判定できる
+    （``rank`` の目視比較だけでは検定にならないため、この関数で置き換える）。
+
+    Parameters
+    ----------
+    calibrated_models : predictor.calibration.CalibratedModels
+        較正済みモデル（``predictor.model.predict`` に渡せるもの）。
+    test_df : pd.DataFrame
+        評価対象データ（``evaluation.evaluate`` が要求するカラムを含む）。
+    features : tuple[str, ...] | None
+        対象フィーチャー。None の場合は ``_PEDIGREE_FEATURES``。
+    n_repeats : int
+        シャッフルの繰り返し回数。
+    ci : float
+        信頼水準。
+    random_state : int | None
+        乱数シード。
+
+    Returns
+    -------
+    pd.DataFrame
+        columns: feature, model, metric, baseline, mean_increase,
+        ci_lower, ci_upper, significant（CI下限 > 0）
+    """
+    from predictor import model as _model
+
+    if features is None:
+        features = _PEDIGREE_FEATURES
+
+    baseline_pred = _model.predict(calibrated_models, test_df)
+    baseline = evaluate(test_df, baseline_pred)
+
+    rng = np.random.default_rng(random_state)
+    alpha = 1.0 - ci
+    rows = []
+    for feature in features:
+        if feature not in test_df.columns:
+            continue
+        win_increases = np.empty(n_repeats, dtype=float)
+        place_increases = np.empty(n_repeats, dtype=float)
+        for i in range(n_repeats):
+            shuffled = test_df.copy()
+            col = shuffled[feature]
+            if isinstance(col.dtype, pd.CategoricalDtype):
+                # category dtype のまま code をシャッフルしないと、predict 時に
+                # 学習時の categorical_feature（dtype/categories）と不一致になる。
+                shuffled[feature] = pd.Categorical.from_codes(
+                    rng.permutation(col.cat.codes.to_numpy()), dtype=col.dtype
+                )
+            else:
+                shuffled[feature] = rng.permutation(col.to_numpy())
+            pred = _model.predict(calibrated_models, shuffled)
+            metrics = evaluate(test_df, pred)
+            win_increases[i] = metrics["win_logloss"] - baseline["win_logloss"]
+            place_increases[i] = metrics["place_logloss"] - baseline["place_logloss"]
+
+        for model_label, metric_key, increases in (
+            ("win", "win_logloss", win_increases),
+            ("place", "place_logloss", place_increases),
+        ):
+            ci_lower = float(np.percentile(increases, 100 * alpha / 2))
+            ci_upper = float(np.percentile(increases, 100 * (1 - alpha / 2)))
+            rows.append(
+                {
+                    "feature": feature,
+                    "model": model_label,
+                    "metric": metric_key,
+                    "baseline": baseline[metric_key],
+                    "mean_increase": float(increases.mean()),
+                    "ci_lower": ci_lower,
+                    "ci_upper": ci_upper,
+                    "significant": ci_lower > 0,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def paired_bootstrap_model_comparison(
+    test_df: pd.DataFrame,
+    pred_df_a: pd.DataFrame,
+    pred_df_b: pd.DataFrame,
+    n_bootstrap: int = 10_000,
+    ci: float = 0.95,
+    random_state: int | None = None,
+) -> pd.DataFrame:
+    """2つのモデル（例: baseline と特徴量追加/削除後）の性能差をペアードbootstrapで検定する。
+
+    race_id を復元抽出でリサンプリングし、a・b の両方を **同じ** レース集合で
+    評価することで、モデル間の性能差が偶然のブレを超えて有意かどうかを検定する。
+    2つの独立な信頼区間を目視で見比べるより厳密（特徴量の採否判断は本来これを使う。
+    [ADR-0027](../adr/0027-pedigree-affinity-win-rate-rejected.md)/
+    [ADR-0028](../adr/0028-pedigree-affinity-place-rate-shrinkage-accepted.md) で
+    使われた手法を再利用可能な形にした）。
+
+    Parameters
+    ----------
+    test_df : pd.DataFrame
+        race_id, horse_number, is_win, is_placed, odds を含む
+    pred_df_a : pd.DataFrame
+        比較対象A（通常は baseline）の予測結果（``model.predict`` の出力）
+    pred_df_b : pd.DataFrame
+        比較対象B（通常は変更後モデル）の予測結果
+    n_bootstrap : int
+        ブートストラップ試行回数。デフォルト 10000。
+    ci : float
+        信頼水準。
+    random_state : int | None
+        乱数シード。
+
+    Returns
+    -------
+    pd.DataFrame
+        指標（win_logloss, place_logloss, win_accuracy, recovery_rate）ごとに
+        a の点推定・b の点推定・差（b - a）・差の95%CI・有意フラグ（CIが0を跨がない）
+    """
+
+    def _merge(pred_df: pd.DataFrame) -> pd.DataFrame:
+        merged = test_df[["race_id", "horse_number", "is_win", "is_placed", "odds"]].merge(
+            pred_df[["race_id", "horse_number", "win_prob", "place_prob"]],
+            on=["race_id", "horse_number"],
+        )
+        merged["odds"] = pd.to_numeric(merged["odds"], errors="coerce")
+        return merged
+
+    race_ids = test_df["race_id"].unique()
+    race_index = {rid: i for i, rid in enumerate(race_ids)}
+    n_races = len(race_ids)
+    eps = 1e-15
+
+    def _race_stats(pred_df: pd.DataFrame) -> dict[str, np.ndarray]:
+        merged = _merge(pred_df)
+        race_idx = merged["race_id"].map(race_index).to_numpy()
+
+        p_win = merged["win_prob"].to_numpy().clip(eps, 1 - eps)
+        p_place = merged["place_prob"].to_numpy().clip(eps, 1 - eps)
+        is_win = merged["is_win"].to_numpy(dtype=float)
+        is_placed = merged["is_placed"].to_numpy(dtype=float)
+        nll_win = -(is_win * np.log(p_win) + (1 - is_win) * np.log(1 - p_win))
+        nll_place = -(
+            is_placed * np.log(p_place) + (1 - is_placed) * np.log(1 - p_place)
+        )
+
+        nll_win_sum = np.zeros(n_races)
+        nll_place_sum = np.zeros(n_races)
+        n_horses = np.zeros(n_races)
+        np.add.at(nll_win_sum, race_idx, nll_win)
+        np.add.at(nll_place_sum, race_idx, nll_place)
+        np.add.at(n_horses, race_idx, 1.0)
+
+        top1_idx = merged.groupby("race_id")["win_prob"].idxmax()
+        top1 = merged.loc[top1_idx].set_index("race_id").reindex(race_ids)
+        top1_hit = top1["is_win"].to_numpy(dtype=float)
+        # 外れ馬の odds 欠損で NaN が伝播しないよう、的中時のみ odds を寄与させる
+        top1_payout = np.where(top1_hit == 1.0, top1["odds"].to_numpy(dtype=float), 0.0)
+
+        return {
+            "nll_win_sum": nll_win_sum,
+            "nll_place_sum": nll_place_sum,
+            "n_horses": n_horses,
+            "top1_hit": top1_hit,
+            "top1_payout": top1_payout,
+        }
+
+    stats_a = _race_stats(pred_df_a)
+    stats_b = _race_stats(pred_df_b)
+
+    def _metrics(stats: dict[str, np.ndarray], idx: np.ndarray) -> dict[str, float]:
+        n = stats["n_horses"][idx].sum()
+        return {
+            "win_logloss": float(stats["nll_win_sum"][idx].sum() / n),
+            "place_logloss": float(stats["nll_place_sum"][idx].sum() / n),
+            "win_accuracy": float(stats["top1_hit"][idx].mean()),
+            # 的中馬の odds が欠損しているレースが少数混ざることがあるため、
+            # 単純な .sum() だと NaN が全体に伝播してしまう。evaluate() の
+            # pandas skipna 相当の挙動（欠損項をゼロ寄与として扱う）に合わせる。
+            "recovery_rate": float(np.nansum(stats["top1_payout"][idx]) / len(idx)),
+        }
+
+    all_idx = np.arange(n_races)
+    point_a = _metrics(stats_a, all_idx)
+    point_b = _metrics(stats_b, all_idx)
+
+    metric_names = ["win_logloss", "place_logloss", "win_accuracy", "recovery_rate"]
+    rng = np.random.default_rng(random_state)
+    diffs = {m: np.empty(n_bootstrap) for m in metric_names}
+    for i in range(n_bootstrap):
+        idx = rng.integers(0, n_races, size=n_races)
+        m_a = _metrics(stats_a, idx)
+        m_b = _metrics(stats_b, idx)
+        for m in metric_names:
+            diffs[m][i] = m_b[m] - m_a[m]
+
+    alpha = 1.0 - ci
+    rows = []
+    for m in metric_names:
+        d = diffs[m]
+        ci_lower = float(np.percentile(d, 100 * alpha / 2))
+        ci_upper = float(np.percentile(d, 100 * (1 - alpha / 2)))
+        rows.append(
+            {
+                "metric": m,
+                "a": point_a[m],
+                "b": point_b[m],
+                "diff_b_minus_a": point_b[m] - point_a[m],
+                "ci_lower": ci_lower,
+                "ci_upper": ci_upper,
+                "significant": not (ci_lower <= 0 <= ci_upper),
+            }
+        )
+    return pd.DataFrame(rows)

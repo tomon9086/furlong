@@ -255,7 +255,7 @@ furlong/
 | 上がり3ハロン相対順位（全レース） | `avg_last3f_rank_last3`, `avg_last3f_rank_last5` |
 | 上がり3ハロン相対順位（同コース種別・同距離） | `avg_last3f_rank_last3_cond`, `avg_last3f_rank_last5_cond` |
 | タイム偏差値（スピード指数） | `avg_speed_index_last3`, `avg_speed_index_last5`（タイムのレース内z-scoreを直近走で平均） |
-| 血統 | `sire`, `dam`, `broodmare_sire` |
+| 血統 | `sire`, `broodmare_sire`（`dam` は検証の結果、有意な寄与が確認できず不採用。[ADR-0030](./adr/0030-dam-feature-removed.md) 参照） |
 | 血統適性統計 | `sire_place_rate_cond`（父馬×コース種別の産駒複勝率、縮小推定）, `sire_progeny_mounts_cond`（同・累積産駒数）, `sire_avg_speed_index_cond`（父馬×コース種別の産駒平均スピード指数、縮小推定） |
 | 騎手統計 | `jockey_win_rate_venue_cond`（場・コース種別の勝率）, `jockey_prior_win_rate`, `jockey_prior_mounts`（デビューからそのレース直前までの全期間累積勝率・累積騎乗数） |
 | 調教師統計 | `trainer_win_rate_last30`（直近30走の勝率）, `trainer_prior_win_rate`, `trainer_prior_mounts`（全期間累積勝率・累積騎乗数） |
@@ -270,6 +270,8 @@ furlong/
 > **`days_since_last_race`（出走間隔）は2段階の検証を経て採用。** 単独での初回検証（2026-08-03朝、`class_change`等の採用前）では標準splitの回収率が悪化し一度不採用と判定したが、walk-forward検証は行わなかった。後日、他の特徴量（クラス変化・レース内ペース予想・スピード指数）採用後の状態で再検証したところ、標準splitでの悪化はほぼ誤差範囲まで縮小し、walk-forwardでは4指標（win_accuracy・recovery_rate・win_logloss・place_logloss）すべてが改善したため採用に切り替えた。特徴量の価値は既存の特徴量セットに依存して変わりうる（単独検証の結果を過信しない）教訓として記録。詳細は [ADR-0024](./adr/0024-days-since-last-race-accepted.md)（初回不採用は[ADR-0016](./adr/0016-days-since-last-race-initial-rejected.md)）参照。
 
 > **血統適性統計（`sire_place_rate_cond` 等）は2段階の検証を経て採用。** 当初「父馬×コース種別（×距離帯）の単勝勝率」で検証したところ、標準splitでは改善して見えたが正式なペアード・ブートストラップ有意差検定では win_logloss・place_logloss・win_accuracy いずれも95%CIが0を跨ぎ有意差なし（不採用、詳細は [ADR-0027](./adr/0027-pedigree-affinity-win-rate-rejected.md) 参照）。単勝は稀事象で父馬あたりのサンプルが薄いと高分散になるのが原因と判断し、(1) 発生率の高い複勝率への変更、(2) 少サンプルの極端値を抑える縮小推定（shrinkage、式: `(実測合計 + K×事前平均) / (件数 + K)`。複勝率は K=20、事前平均は全体複勝率、スピード指数は K=10・事前平均0）、(3) 連続値であるスピード指数（`race_time_zscore`）ベースの適性指標、の3方向で再設計したところ、`sire_place_rate_cond` と `sire_avg_speed_index_cond` の組み合わせが標準split・walk-forward・正式有意差検定（95%CI）のすべてで一貫して有意な改善を示したため採用した。母父馬×馬場状態版（BMSのダート・重馬場適性という経験則の検証）は単体でLog Lossが悪化し不採用。**構成要素ごとの個別検定では `sire_avg_speed_index_cond`（スピード指数側）のみ単体で3指標とも有意、`sire_place_rate_cond`（複勝率側）は単体では有意差なし**。ただし複勝率側を追加すると単体のスピード指数版よりLog Lossがさらに有意に改善する（D+E+F vs F単体の直接比較で確認済み）ため、複勝率側の追加自体が本物の相補効果と判断し組み合わせで採用した。2026-08-10採用、詳細は [ADR-0028](./adr/0028-pedigree-affinity-place-rate-shrinkage-accepted.md) 参照。
+>
+> **`dam`（母馬名）は特徴量から除外。** gain降順rankでは複勝モデル常に1位に見えていたが、permutation importance検定（シャッフルによるlog-loss悪化幅の95% bootstrap CI、CI下限>0で有意）では複勝モデルで全walk-forwardフォールド非有意、単勝モデルでも一部フォールドで非有意と判明。高カーディナリティな個体名categoricalはgainが訓練データへの過適合を過大評価しやすいと判断し、除外案をペアード・ブートストラップ有意差検定（標準split・walk-forward双方、95%CI）で検証したところ、除外後の方がwin_logloss・place_logloss・win_accuracyいずれも統計的に有意に改善し、recovery_rateも有意差なし（悪化ではない）だったため除外を採用した。2026-08-10、詳細は [ADR-0030](./adr/0030-dam-feature-removed.md) 参照。
 >
 > **市場オッズ（`odds`, `popularity`）は学習特徴量から除外。** 確定オッズを含めると「市場オッズの模倣」になり控除率分の損失が上限となるため。事前オッズ（`pre_race_odds.win_odds`）は EV 計算にのみ使用する。
 

@@ -471,7 +471,9 @@ def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
             cur.execute(_TRAINER_PRIOR_WIN_RATE_QUERY, (trainer_ids, race_date))
             trainer_prior_rows = cur.fetchall()
             trainer_prior_cols = [desc[0] for desc in cur.description]
-            trainer_prior_df = pd.DataFrame(trainer_prior_rows, columns=trainer_prior_cols)
+            trainer_prior_df = pd.DataFrame(
+                trainer_prior_rows, columns=trainer_prior_cols
+            )
 
             cur.execute(_JOCKEY_PRIOR_WIN_RATE_QUERY, (jockey_ids, race_date))
             jockey_prior_rows = cur.fetchall()
@@ -485,7 +487,9 @@ def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
 
             cur.execute(_GLOBAL_PLACE_RATE_QUERY, (race_date,))
             global_place_rate = cur.fetchone()[0]
-            global_place_rate = float(global_place_rate) if global_place_rate is not None else 0.0
+            global_place_rate = (
+                float(global_place_rate) if global_place_rate is not None else 0.0
+            )
 
             cur.execute(
                 _SIRE_PLACE_RATE_QUERY,
@@ -535,9 +539,13 @@ def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
     )
     # 産駒実績が0件（=SQLのGROUP BYで該当なし）の場合、学習時の縮小推定が返す値
     # （mounts=0 → 母平均そのもの）と一致させるため明示的に埋める。
-    result["sire_place_rate_cond"] = result["sire_place_rate_cond"].fillna(global_place_rate)
+    result["sire_place_rate_cond"] = result["sire_place_rate_cond"].fillna(
+        global_place_rate
+    )
     result["sire_progeny_mounts_cond"] = result["sire_progeny_mounts_cond"].fillna(0.0)
-    result["sire_avg_speed_index_cond"] = result["sire_avg_speed_index_cond"].fillna(0.0)
+    result["sire_avg_speed_index_cond"] = result["sire_avg_speed_index_cond"].fillna(
+        0.0
+    )
     return result
 
 
@@ -648,9 +656,9 @@ def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFra
     # 斤量のレース内相対値（z-score: レース内で正規化）
     _wc_mean = df.groupby("race_id")["weight_carried"].transform("mean")
     _wc_std = df.groupby("race_id")["weight_carried"].transform("std")
-    df["weight_carried_relative"] = (
-        df["weight_carried"] - _wc_mean
-    ) / _wc_std.where(_wc_std > 0)
+    df["weight_carried_relative"] = (df["weight_carried"] - _wc_mean) / _wc_std.where(
+        _wc_std > 0
+    )
 
     # last_3f のレース内相対順位（順位1 = 最速）
     df["last_3f_rank"] = df.groupby("race_id")["last_3f"].rank(
@@ -1249,7 +1257,9 @@ def get_feature_columns(extra_columns: list[str] | None = None) -> list[str]:
         "avg_speed_index_last5",
         # 血統
         "sire",
-        "dam",
+        # ADR-0030 により除外: permutation importance検定で有意な寄与が確認できず、
+        # 除外後の方がwin_logloss/place_logloss/win_accuracyが有意に改善
+        # "dam",
         "broodmare_sire",
         # 血統適性統計（父馬×コース種別の産駒複勝率・平均スピード指数、縮小推定）
         "sire_place_rate_cond",

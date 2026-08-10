@@ -42,6 +42,11 @@ AI エージェント（Claude など）がこのリポジトリで作業する�
    - 過去の決定を覆す場合は新しいADRを作成し、旧ADRのStatusを `Superseded by ADR-NNNN` に書き換える（削除しない）。
    - 判定に至らなかった探索的な計測はADR化・記録しない（`git log` から辿れれば十分）。
 
+6. **測定・検証には必ず検定を行う**
+   - 「改善した」「悪化した」「安定している」「有意」など判定を伴う言葉を使う場合、単一splitの点推定やランクの目視比較だけで結論を出さない。
+   - 回収率など既存の bootstrap CI 関数（`evaluation.bootstrap_recovery_ci` 系）がある指標はそれを使う。無い指標（feature importance など）は permutation importance の信頼区間など、点推定に加えてばらつきを検定できる手法を用いる。
+   - 「単一splitの点推定は分散が大きく信用できない」は [ADR-0009](./docs/adr/0009-longshot-quinella-trio-strategy-rejected.md) で得た教訓であり、以後の検証全般に適用する。
+
 ---
 
 ## コーディング規約
