@@ -9,6 +9,9 @@
     # 指定した race_id の出馬表を強制再取得（既存データを上書き）
     uv run --package furlong-scraper python -m scraper.backfill_missing --force 202605030511 202605030512
 
+    # 確定オッズが欠損しているレースだけを結果ページから再取得（--limit で件数を絞れる）
+    uv run --package furlong-scraper python -m scraper.backfill_missing --odds-missing --limit 5
+
 環境変数:
     DATABASE_URL  PostgreSQL 接続文字列（例: postgresql://user:pass@localhost:5432/furlong）
 """
@@ -76,6 +79,15 @@ WHERE NOT EXISTS (
 )
   AND TO_DATE(r.date, 'YYYY/MM/DD') < CURRENT_DATE
 ORDER BY r.date DESC
+"""
+
+_Q_ODDS_MISSING_RACES = """
+SELECT DISTINCT rr.race_id
+FROM race_results rr
+JOIN races r ON r.race_id = rr.race_id
+WHERE rr.finishing_position ~ '^[0-9]+$'
+  AND (rr.odds IS NULL OR rr.odds !~ '^[0-9.]+$')
+ORDER BY rr.race_id
 """
 
 
@@ -250,6 +262,14 @@ def main() -> None:
         help="指定した race_id の出馬表を強制再取得して DB を上書きする",
     )
     parser.add_argument(
+        "--odds-missing",
+        action="store_true",
+        help=(
+            "完走馬なのに確定オッズ(race_results.odds)が欠損しているレースだけを"
+            "結果ページから再取得して上書きする"
+        ),
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=None,
@@ -272,6 +292,21 @@ def main() -> None:
         print()
         print("=== 強制再取得 完了 ===")
         print(f"出馬表: 成功 {ok} 件 / 失敗 {fail} 件")
+        return
+
+    # --odds-missing モード: 確定オッズ欠損レースだけを結果ページから再取得して終了
+    if args.odds_missing:
+        with psycopg.connect(database_url) as conn:
+            race_ids = _fetch_missing_ids(conn, _Q_ODDS_MISSING_RACES)
+        if args.limit is not None:
+            race_ids = race_ids[: args.limit]
+        logger.info("オッズ欠損レース %d 件を再取得します。", len(race_ids))
+        db = Database(database_url)
+        with NetkeibaClient() as client:
+            ok, fail = backfill_races(race_ids, db, client)
+        print()
+        print("=== オッズ欠損レース再取得 完了 ===")
+        print(f"レース結果: 成功 {ok} 件 / 失敗 {fail} 件")
         return
 
     with psycopg.connect(database_url) as conn:

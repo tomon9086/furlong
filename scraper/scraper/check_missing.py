@@ -81,6 +81,16 @@ WHERE EXISTS (
 ORDER BY r.date DESC
 """
 
+_Q6_ODDS = """
+SELECT r.race_id, r.race_name, r.date
+FROM races r
+JOIN race_results rr ON rr.race_id = r.race_id
+WHERE rr.finishing_position ~ '^[0-9]+$'
+  AND (rr.odds IS NULL OR rr.odds !~ '^[0-9.]+$')
+GROUP BY r.race_id, r.race_name, r.date
+ORDER BY r.date DESC
+"""
+
 # --------------------------------------------------------------------------- #
 # 出力ヘルパー
 # --------------------------------------------------------------------------- #
@@ -135,11 +145,15 @@ def main() -> None:
             cur.execute(_Q5_PAYOFFS)
             rows5 = cur.fetchall()
 
+            cur.execute(_Q6_ODDS)
+            rows6 = cur.fetchall()
+
     c1 = _print_check("1. 馬マスタ欠損", rows1, ["horse_id", "horse_name"])
     c2 = _print_check("2. 騎手マスタ欠損", rows2, ["jockey_id", "jockey_name"])
     c3 = _print_check("3. 調教師マスタ欠損", rows3, ["trainer_id", "trainer_name"])
     c4 = _print_check("4. レース結果欠落", rows4, ["race_id", "race_name", "date"])
     c5 = _print_check("5. 払い戻し欠落", rows5, ["race_id", "race_name", "date"])
+    c6 = _print_check("6. 確定オッズ欠損", rows6, ["race_id", "race_name", "date"])
 
     print("=== サマリ ===")
     print(f"1. 馬マスタ欠損:       {c1:>6} 件")
@@ -147,6 +161,7 @@ def main() -> None:
     print(f"3. 調教師マスタ欠損:   {c3:>6} 件")
     print(f"4. レース結果欠落:     {c4:>6} 件")
     print(f"5. 払い戻し欠落:       {c5:>6} 件")
+    print(f"6. 確定オッズ欠損:     {c6:>6} 件")
 
 
 if __name__ == "__main__":
