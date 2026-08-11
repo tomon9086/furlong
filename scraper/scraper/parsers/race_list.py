@@ -35,28 +35,31 @@ class RaceListParser(BaseParser):
     def parse_total_pages(self, html: str) -> int:
         """ページネーションから総ページ数を返す.
 
-        ページネーションが見つからない場合は 1 を返す。
+        `class="pager"` の div はページ送りリンクを含まない「1,717件中1~100件目」
+        という件数サマリーのテキストのみで、実際のページ送りリンク（`<li>` 内、
+        pager クラスなし）は DOM 構造が不安定なため頼らない。件数サマリーから
+        総件数・1ページあたり件数を読み取り、ページ数を計算する。
+        サマリーが見つからない場合は 1 を返す。
         """
         soup = self.parse_html(html)
 
-        # pager div 内のページ番号リンクを収集
         pager = soup.find("div", class_="pager")
         if not pager:
             return 1
 
-        max_page = 1
-        for a in pager.find_all("a", href=re.compile(r"page=\d+")):
-            m = re.search(r"page=(\d+)", a["href"])
-            if m:
-                max_page = max(max_page, int(m.group(1)))
+        text = pager.get_text(strip=True)
+        m = re.search(r"([\d,]+)件中(\d+)[~〜](\d+)件目", text)
+        if not m:
+            return 1
 
-        # 現在のページ（リンクなし）も確認
-        for span in pager.find_all("span"):
-            text = span.get_text(strip=True)
-            if text.isdigit():
-                max_page = max(max_page, int(text))
+        total = int(m.group(1).replace(",", ""))
+        start = int(m.group(2))
+        end = int(m.group(3))
+        per_page = end - start + 1
+        if per_page <= 0:
+            return 1
 
-        return max_page
+        return -(-total // per_page)  # ceil division
 
     def parse_by_date(self, html: str) -> list[str]:
         """race.netkeiba.com の開催日別レース一覧ページからレースIDを取得する.
