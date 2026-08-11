@@ -38,9 +38,14 @@ logger = logging.getLogger(__name__)
 _Q_MISSING_HORSES = """
 SELECT DISTINCT rr.horse_id
 FROM race_results rr
+LEFT JOIN horses h ON h.horse_id = rr.horse_id
 WHERE rr.horse_id IS NOT NULL
   AND rr.horse_id <> ''
-  AND rr.horse_id NOT IN (SELECT horse_id FROM horses)
+  AND (
+    h.horse_id IS NULL
+    OR h.horse_name IS NULL OR h.horse_name = ''
+    OR h.sire IS NULL OR h.sire = ''
+  )
 ORDER BY rr.horse_id
 """
 
@@ -244,6 +249,13 @@ def main() -> None:
         metavar="RACE_ID",
         help="指定した race_id の出馬表を強制再取得して DB を上書きする",
     )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="各カテゴリの補完対象を先頭 N 件に絞る（動作確認用）",
+    )
     args = parser.parse_args()
 
     try:
@@ -281,6 +293,12 @@ def main() -> None:
         len(jockey_ids),
         len(trainer_ids),
     )
+
+    if args.limit is not None:
+        race_ids = race_ids[: args.limit]
+        horse_ids = horse_ids[: args.limit]
+        jockey_ids = jockey_ids[: args.limit]
+        trainer_ids = trainer_ids[: args.limit]
 
     if not race_ids and not horse_ids and not jockey_ids and not trainer_ids:
         logger.info("補完対象がありません。終了します。")
