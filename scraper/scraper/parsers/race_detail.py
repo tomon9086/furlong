@@ -81,6 +81,9 @@ class RaceDetailParser(BaseParser):
             row["馬ID"] = horse_id
             row["騎手ID"] = jockey_id
             row["調教師ID"] = trainer_id
+            # レース結果テーブルのオッズ列ヘッダーは「単勝」（出馬表側の「単勝オッズ」とは異なる）。
+            # DB保存側（repository.database）は「単勝オッズ」キーを参照するため正規化する。
+            row["単勝オッズ"] = row.get("単勝", "")
 
             rows.append(row)
 
