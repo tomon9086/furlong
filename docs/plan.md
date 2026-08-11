@@ -25,6 +25,7 @@
 | [plan/feature-expansion-2026-08.md](./plan/feature-expansion-2026-08.md) | 特徴量拡張の検討（出走間隔・馬場状態別適性・クラス変化 等9案、バッチ検証方針） |
 | [plan/regional-racing-model.md](./plan/regional-racing-model.md) | 地方競馬モデルの分離検討（2026-08-11）。oddsのnull調査から発覚したvenue急拡大を発端に、別モデル/統合の比較・決定 |
 | [plan/odds-scraping-bug-2026-04.md](./plan/odds-scraping-bug-2026-04.md) | 確定オッズ欠損バグ（2026-04-29〜）の根本原因調査（2026-08-11）。ヘッダーキー不一致の特定、影響範囲720レース、修正方針 |
+| [plan/race-list-pagination-bug-2026-04.md](./plan/race-list-pagination-bug-2026-04.md) | レース一覧ページの総ページ数判定バグ（2026-08-11発覚）。稼働開始（2026-04-26）以降、中央・地方問わず月間実績の1〜2割しか取得できていなかった。修正・全場キャッチアップ実行中 |
 
 ---
 
