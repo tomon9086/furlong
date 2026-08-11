@@ -86,9 +86,10 @@
       odds欠損は `RaceDetailParser` のヘッダーキー不一致バグ（実装当初から存在）、venue急拡大はバグではなく
       シードデータと稼働開始後のscraperのスコープ差。影響範囲は720レース（2026/04/29〜07/24）。
       詳細は [plan/odds-scraping-bug-2026-04.md](./plan/odds-scraping-bug-2026-04.md) 参照
-- [ ] odds欠損の原因を修正し、`backfill_missing.py --force` 等で該当720レース（2026/04/29〜07/24）を再取得する
-- [ ] `check_missing.py` に odds 欠損検知クエリを追加する（行は存在するがカラムがnullのケースは
-      現状検知できていない）
+- [x] odds欠損の原因を修正し、該当レースを再取得する — 2026-08-11、`race_detail.py` に1行修正
+      （`単勝オッズ`キー正規化）を投入。`backfill_missing.py --odds-missing` を新設しgolemで実行、
+      718/718件成功・失敗0件。`check_missing.py`で確定オッズ欠損0件を確認済み
+- [x] `check_missing.py` に odds 欠損検知クエリを追加する — 2026-08-11対応済み（項目6として追加）
 - [ ] oddsバグ修正・再取得後、現行テストセットの回収率・EVフィルタ分析への影響度を
       bootstrap CIで定量化する（欠損期間を除いた場合との差が有意か）
 - [ ] 中央競馬モデルの現行testセットに混入している新規venue（阪神・函館・小倉・福島・地方競馬）が
