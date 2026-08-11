@@ -251,11 +251,30 @@ def scrape_shutuba(race_id: str) -> None:
         _supplement_jockeys_and_trainers(rows, db, client)
 
 
-def scrape_backfill(year: int, month: int) -> None:
+def scrape_backfill(
+    year: int,
+    month: int,
+    venue_codes: list[str] | None = None,
+    limit: int | None = None,
+) -> int:
     """指定年月の全レースをスクレイピングして DB に保存する.
 
     レース一覧ページを全ページ走査し、DB に未登録のレースのみ取得する。
     クライアントを使い回すことでインターバルが正しく機能する。
+
+    Parameters
+    ----------
+    venue_codes : list[str] | None
+        指定した場合、race_id中のvenueコード（5〜6桁目）でフィルタする
+        （地方競馬の場だけを対象にする遡及バックフィル用）。
+    limit : int | None
+        指定した場合、この呼び出しで新規保存する件数をその上限で打ち切る
+        （複数月にまたがる累計件数を呼び出し側で制御するパイロット実行用）。
+
+    Returns
+    -------
+    int
+        この呼び出しで実際に保存できた件数。
     """
     list_parser = RaceListParser()
     race_parser = RaceDetailParser()
@@ -277,13 +296,20 @@ def scrape_backfill(year: int, month: int) -> None:
 
         logger.info("一覧から取得したレース数: %d", len(all_race_ids))
 
+        if venue_codes is not None:
+            all_race_ids = [rid for rid in all_race_ids if rid[4:6] in venue_codes]
+            logger.info("venueフィルタ後のレース数: %d", len(all_race_ids))
+
         # DB に未登録のレースだけ対象にする
         existing_ids = db.get_existing_race_ids(all_race_ids)
         missing_ids = [rid for rid in all_race_ids if rid not in existing_ids]
+        if limit is not None:
+            missing_ids = missing_ids[:limit]
         logger.info(
             "未登録レース数: %d（スキップ: %d）", len(missing_ids), len(existing_ids)
         )
 
+        ok = 0
         for i, race_id in enumerate(missing_ids, start=1):
             logger.info("[%d/%d] レース %s を取得中...", i, len(missing_ids), race_id)
             try:
@@ -294,10 +320,12 @@ def scrape_backfill(year: int, month: int) -> None:
                 db.save_race(race_id, race_info, results, payoffs)
                 _supplement_horses(results, db, client)
                 _supplement_jockeys_and_trainers(results, db, client)
+                ok += 1
             except Exception:
                 logger.exception(
                     "レース %s の取得に失敗しました。スキップします。", race_id
                 )
+        return ok
 
 
 def scrape_incremental(start_date: date | None = None) -> None:
@@ -338,6 +366,52 @@ def scrape_incremental(start_date: date | None = None) -> None:
             year, month = year + 1, 1
         else:
             month += 1
+
+
+def scrape_regional_backfill(
+    venue_codes: list[str],
+    start_year: int,
+    start_mon: int,
+    end_year: int,
+    end_mon: int,
+    limit: int | None = None,
+) -> None:
+    """地方競馬の指定venue・期間を遡及バックフィルする.
+
+    直近月から過去に向かって1ヶ月ずつ `scrape_backfill` を呼び出す（新しいデータほど
+    優先的に取得し、途中で打ち切ってもその時点までの分は無駄にならないようにするため）。
+
+    Parameters
+    ----------
+    venue_codes : list[str]
+        対象venueコードのリスト（例: ["42", "43", "44", "45"] = 浦和・船橋・大井・川崎）。
+    limit : int | None
+        指定した場合、累計保存件数がこれに達した時点で打ち切る（パイロット実行用）。
+    """
+    logger.info(
+        "地方競馬遡及バックフィル: venue=%s 期間=%d年%d月〜%d年%d月 limit=%s",
+        venue_codes,
+        start_year,
+        start_mon,
+        end_year,
+        end_mon,
+        limit,
+    )
+
+    year, month = end_year, end_mon
+    total = 0
+    while (year, month) >= (start_year, start_mon):
+        remaining = None if limit is None else limit - total
+        if limit is not None and remaining <= 0:
+            break
+        logger.info("=== %d年%d月 (累計 %d件保存済み) ===", year, month, total)
+        total += scrape_backfill(year, month, venue_codes=venue_codes, limit=remaining)
+        if month == 1:
+            year, month = year - 1, 12
+        else:
+            month -= 1
+
+    logger.info("地方競馬遡及バックフィル完了: 累計 %d件保存", total)
 
 
 def scrape_shutuba_upcoming(target_date: date | None = None) -> None:
@@ -411,6 +485,15 @@ def main() -> None:
         print("  mode=backfill          例: python -m scraper backfill 2026 1")
         print("  mode=incremental       例: python -m scraper incremental")
         print("                             python -m scraper incremental 2026 5")
+        print(
+            "  mode=backfill_regional 例: python -m scraper backfill_regional "
+            "44 2016 1 2026 7 [--limit 300]"
+        )
+        print(
+            "                             "
+            "(venue_codesはカンマ区切り。直近月から過去に向かって取得。"
+            "--limitは累計保存件数の上限＝パイロット実行用)"
+        )
         sys.exit(1)
 
     mode = sys.argv[1]
@@ -463,6 +546,24 @@ def main() -> None:
             scrape_incremental(start_date=start)
         else:
             scrape_incremental()
+    elif mode == "backfill_regional":
+        if len(sys.argv) < 7:
+            print(
+                "使用方法: python -m scraper backfill_regional "
+                "<venue_codes> <start_year> <start_mon> <end_year> <end_mon> [--limit N]"
+            )
+            print("  例: python -m scraper backfill_regional 44 2016 1 2026 7 --limit 300")
+            sys.exit(1)
+        venue_codes = sys.argv[2].split(",")
+        start_year, start_mon = int(sys.argv[3]), int(sys.argv[4])
+        end_year, end_mon = int(sys.argv[5]), int(sys.argv[6])
+        limit = None
+        if "--limit" in sys.argv:
+            idx = sys.argv.index("--limit")
+            limit = int(sys.argv[idx + 1])
+        scrape_regional_backfill(
+            venue_codes, start_year, start_mon, end_year, end_mon, limit=limit
+        )
     else:
         print(f"不明なmode: {mode}")
         sys.exit(1)
