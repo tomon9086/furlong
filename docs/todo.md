@@ -73,6 +73,29 @@
 - [x] バッチ4: 新規4案（厩舎複数出走・頭数正規化近走成績・斤量自己比較・騎手直近30走勝率）— 検証済み・全て不採用（Log Lossの変化はノイズレベル、accuracy・recoveryは軒並み悪化。詳細は [experiments.md](./experiments.md) 参照）
 - [x] 通算出走数（`career_starts_prior`）— 検証済み・不採用（同上のパターン）
 
+## 地方競馬モデルの分離
+
+> 発端: 勝ち馬oddsのnull調査（2026-08-11）で、`race_results.odds` が2026/04/27頃から新規レースで
+> ほぼ100%欠損していることが判明。同時期に `races.venue` の対象が中央4場から地方14場＋中央残り4場
+> （計18場）へ意図せず急拡大しており、現行の学習・較正データに一度も出現しないcold-start状態に
+> なっている。この発覚をきっかけに「地方競馬の予想もしたい」という要望が生まれ、モデル構成を検討した。
+> 計画: [plan/regional-racing-model.md](./plan/regional-racing-model.md)
+> 方針: 中央競馬モデルとは別モデルに分離する（2026-08-11決定）。
+
+- [x] 2026年4月のスクレイパー変更の根本原因を調査する — 2026-08-11、odds欠損とvenue急拡大は無関係な別事象と判明。
+      odds欠損は `RaceDetailParser` のヘッダーキー不一致バグ（実装当初から存在）、venue急拡大はバグではなく
+      シードデータと稼働開始後のscraperのスコープ差。影響範囲は720レース（2026/04/29〜07/24）。
+      詳細は [plan/odds-scraping-bug-2026-04.md](./plan/odds-scraping-bug-2026-04.md) 参照
+- [ ] odds欠損の原因を修正し、`backfill_missing.py --force` 等で該当720レース（2026/04/29〜07/24）を再取得する
+- [ ] `check_missing.py` に odds 欠損検知クエリを追加する（行は存在するがカラムがnullのケースは
+      現状検知できていない）
+- [ ] oddsバグ修正・再取得後、現行テストセットの回収率・EVフィルタ分析への影響度を
+      bootstrap CIで定量化する（欠損期間を除いた場合との差が有意か）
+- [ ] 中央競馬モデルの現行testセットに混入している新規venue（阪神・函館・小倉・福島・地方競馬）が
+      win_logloss等に有意な悪化をもたらしていないか、同一期間内で既知venue vs 未知venueのbootstrap比較で検証する
+- [ ] 地方競馬（ばんえいを除く）の過去データ遡及可能性を調査する（netkeiba上のデータ深度・場ごとの違い）
+- [ ] 地方競馬専用の特徴量パイプライン設計に着手する（`class_level` 抽出がNAR表記に非対応、等）
+
 ## predictor HTTP API
 
 - [x] `furlong-predictor` の `pyproject.toml` に `uvicorn` / `fastapi` 依存を追加
