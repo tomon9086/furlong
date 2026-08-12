@@ -55,3 +55,7 @@ output/
 
 # DB backup data
 backup/data/
+
+# 実行ログ
+logs/
+*.log
