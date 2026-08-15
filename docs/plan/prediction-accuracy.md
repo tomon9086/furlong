@@ -7,7 +7,7 @@
 
 ## DB スキーマ調査メモ（2026-05-18）
 
-実際の DB（golem.tailc53cfd.ts.net / netkeiba DB）を調査して判明した事項。
+実際の DB（本番ホストの netkeiba DB）を調査して判明した事項。
 
 ### テーブル名の違い（spec.md 初期版との差異）
 
