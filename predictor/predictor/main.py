@@ -104,6 +104,7 @@ def train_mode(
         パラメータを使う。
     """
     from predictor.preprocessing import (
+        JRA_VENUES,
         compute_recent_stats,
         load_data,
         load_payoffs,
@@ -112,7 +113,7 @@ def train_mode(
     )
 
     logger.info("データを読み込み中...")
-    raw = load_data(DATABASE_URL)
+    raw = load_data(DATABASE_URL, venues=JRA_VENUES)
 
     logger.info("前処理中...")
     df = preprocess(raw)
@@ -409,6 +410,7 @@ def predict_mode(race_id: str) -> None:
     """
     from predictor import model, output
     from predictor.preprocessing import (
+        JRA_VENUES,
         load_predict_data,
         preprocess,
     )
@@ -427,7 +429,7 @@ def predict_mode(race_id: str) -> None:
             f"警告: レース {race_id} の出馬表取得に失敗しました。DB の既存データで続行します。"
         )
 
-    raw = load_predict_data(DATABASE_URL, race_id)
+    raw = load_predict_data(DATABASE_URL, race_id, venues=JRA_VENUES)
     if raw.empty:
         logger.error(f"レース {race_id} の出走馬データが見つかりません")
         sys.exit(1)
@@ -442,7 +444,7 @@ def predict_mode(race_id: str) -> None:
             f"警告: レース {race_id} の最新オッズ取得に失敗しました。DB の既存オッズで予測を続行します。"
         )
     else:
-        raw = load_predict_data(DATABASE_URL, race_id)
+        raw = load_predict_data(DATABASE_URL, race_id, venues=JRA_VENUES)
 
     df = preprocess(raw, keep_null_position=True)
 
@@ -487,10 +489,15 @@ def predict_mode(race_id: str) -> None:
 def tune_mode(n_trials: int = 30) -> None:
     """Optuna で LightGBM パラメータと half_life_days を最適化する。"""
     from predictor import tuning
-    from predictor.preprocessing import compute_recent_stats, load_data, preprocess
+    from predictor.preprocessing import (
+        JRA_VENUES,
+        compute_recent_stats,
+        load_data,
+        preprocess,
+    )
 
     logger.info("データを読み込み中...")
-    raw = load_data(DATABASE_URL)
+    raw = load_data(DATABASE_URL, venues=JRA_VENUES)
     df = preprocess(raw)
 
     logger.info("近走成績フィーチャーを計算中...")
@@ -520,6 +527,7 @@ def compare_half_life_mode() -> None:
     """half_life_days の比較実験を実行し、結果を CSV に保存する。"""
     from predictor import half_life_experiment
     from predictor.preprocessing import (
+        JRA_VENUES,
         compute_recent_stats,
         load_data,
         preprocess,
@@ -527,7 +535,7 @@ def compare_half_life_mode() -> None:
     )
 
     logger.info("データを読み込み中...")
-    raw = load_data(DATABASE_URL)
+    raw = load_data(DATABASE_URL, venues=JRA_VENUES)
     df = preprocess(raw)
 
     logger.info("近走成績フィーチャーを計算中...")
@@ -550,6 +558,7 @@ def compare_longshot_mode() -> None:
     """7番人気以下専用モデル（学習行を人気で絞る）とbaselineを比較し、結果をCSVに保存する。"""
     from predictor import longshot_experiment
     from predictor.preprocessing import (
+        JRA_VENUES,
         compute_recent_stats,
         load_data,
         preprocess,
@@ -557,7 +566,7 @@ def compare_longshot_mode() -> None:
     )
 
     logger.info("データを読み込み中...")
-    raw = load_data(DATABASE_URL)
+    raw = load_data(DATABASE_URL, venues=JRA_VENUES)
     df = preprocess(raw)
 
     logger.info("近走成績フィーチャーを計算中...")
@@ -582,10 +591,10 @@ def train_embeddings_mode() -> None:
     val/test への情報リークを避けるため、時系列分割の train 部分のみで学習する。
     """
     from predictor import embedding
-    from predictor.preprocessing import load_data, preprocess, split_by_date
+    from predictor.preprocessing import JRA_VENUES, load_data, preprocess, split_by_date
 
     logger.info("データを読み込み中...")
-    raw = load_data(DATABASE_URL)
+    raw = load_data(DATABASE_URL, venues=JRA_VENUES)
     df = preprocess(raw)
 
     logger.info("時系列分割中（Embedding は train 部分のみで学習しリークを防ぐ）...")
