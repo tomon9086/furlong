@@ -105,12 +105,28 @@ uv run --package furlong-analysis jupyter lab --notebook-dir=analysis
 ## バックアップ
 
 ```bash
+# ローカル開発DBのバックアップ（マイグレーション等の前に実行）
+./backup/backup-local.sh
+
 # 手動バックアップ（本番環境で実行）
 docker compose -f docker-compose.prod.yml run --rm backup /backup.sh
 ```
 
-バックアップファイルは `./backup/` ディレクトリに `furlong_YYYYMMDD_HHMMSS.sql.gz` の形式で保存される。
-定期実行は毎日深夜3:00（crond による自動実行）。
+バックアップファイルは `./backup/data/` ディレクトリに `furlong_YYYYMMDD_HHMMSS.sql.gz` の形式で保存される（gitignore 対象）。
+本番の定期実行は毎日深夜3:00（crond による自動実行）。Claude Code からは `db-backup` skill でも実行できる。
+
+### DB 同期（リモートホスト → ローカル）
+
+任意のリモートホスト（SSH でログイン可能な Postgres コンテナ稼働ホスト）から直接 `pg_dump` して
+ローカル DB に同期する。詳細は [db-sync skill](../.claude/skills/db-sync/SKILL.md) 参照。
+
+```bash
+# myhost（本番ホスト）から取得してローカル DB を同期する
+backup/sync.sh myhost
+
+# 取得のみ（backup/data/ に保存して終了、ローカル DB は変更しない）
+backup/sync.sh myhost --no-restore
+```
 
 ## テスト
 
