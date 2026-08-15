@@ -18,6 +18,10 @@ VAL_RATIO = 0.1
 _PEDIGREE_K_SHRINK = 20.0  # 複勝率の縮小推定の仮想サンプル数
 _PEDIGREE_K_SPEED_SHRINK = 10.0  # スピード指数の縮小推定の仮想サンプル数（母平均0）
 
+# 地方競馬（南関東4場）モデル用のvenue絞り込み。帯広(ば)はばんえい競走という別競技
+# （そり牽引、着順・走破タイムの意味が通常競走と異なる）のため対象外。
+NAR_VENUES: list[str] = ["浦和", "船橋", "大井", "川崎"]
+
 _SELECT_COLS = """
     r.race_id,
     r.race_name,
@@ -62,6 +66,7 @@ LEFT JOIN horses h ON rr.horse_id = h.horse_id"""
 _QUERY = f"""
 SELECT{_SELECT_COLS}{_FROM_CLAUSE}
 WHERE rr.finishing_position ~ '^[0-9]+$'
+  AND (%s::text[] IS NULL OR r.venue = ANY(%s::text[]))
 ORDER BY TO_DATE(r.date, 'YYYY/MM/DD'), r.race_id, rr.horse_number::integer
 """
 
@@ -317,6 +322,7 @@ FROM race_results rr
 JOIN races r ON rr.race_id = r.race_id
 WHERE rr.finishing_position ~ '^[0-9]+$'
   AND TO_DATE(r.date, 'YYYY/MM/DD') < TO_DATE(%s, 'YYYY/MM/DD')
+  AND (%s::text[] IS NULL OR r.venue = ANY(%s::text[]))
 """
 
 _SIRE_PLACE_RATE_QUERY = """
@@ -332,6 +338,7 @@ WHERE rr.finishing_position ~ '^[0-9]+$'
   AND h.sire = ANY(%s)
   AND r.course_type = %s
   AND TO_DATE(r.date, 'YYYY/MM/DD') < TO_DATE(%s, 'YYYY/MM/DD')
+  AND (%s::text[] IS NULL OR r.venue = ANY(%s::text[]))
 GROUP BY h.sire
 """
 
@@ -372,6 +379,7 @@ WHERE rr.finishing_position ~ '^[0-9]+$'
   AND h.sire = ANY(%s)
   AND r.course_type = %s
   AND TO_DATE(r.date, 'YYYY/MM/DD') < TO_DATE(%s, 'YYYY/MM/DD')
+  AND (%s::text[] IS NULL OR r.venue = ANY(%s::text[]))
 GROUP BY h.sire
 """
 
@@ -389,6 +397,7 @@ WHERE rr.finishing_position ~ '^[0-9]+$'
     WHEN r.distance::integer <= 2200 THEN 2
     ELSE 3
   END = %s
+  AND (%s::text[] IS NULL OR r.venue = ANY(%s::text[]))
 GROUP BY rr.bracket_number
 """
 
@@ -417,22 +426,31 @@ def load_payoffs(database_url: str, race_ids: list[str]) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=cols)
 
 
-def load_data(database_url: str) -> pd.DataFrame:
-    """PostgreSQL からレース・出走馬データを読み込む（学習用）。"""
+def load_data(database_url: str, venues: list[str] | None = None) -> pd.DataFrame:
+    """PostgreSQL からレース・出走馬データを読み込む（学習用）。
+
+    venues 指定時は該当venueのみに絞り込む（地方競馬モデル用。`NAR_VENUES` 参照）。
+    """
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
-            cur.execute(_QUERY)
+            cur.execute(_QUERY, (venues, venues))
             rows = cur.fetchall()
             cols = [desc[0] for desc in cur.description]
     return pd.DataFrame(rows, columns=cols)
 
 
-def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
+def load_predict_data(
+    database_url: str, race_id: str, venues: list[str] | None = None
+) -> pd.DataFrame:
     """予測対象レースの出走馬と、SQL ウィンドウ関数で計算した近走成績を読み込む。
 
     対象レースは finishing_position IS NULL の行を取得し、
     近走成績フィーチャーは SQL ウィンドウ関数で集計して直接返す。
     全件の過去成績を Python に転送しないため、学習時より高速に動作する。
+
+    venues 指定時は、父馬適性統計・枠番統計の母集団を該当venueのみに絞り込む
+    （学習時 compute_recent_stats はvenue絞り込み済みのdfから計算するため、
+    ここで絞り込まないとtrain/predict間で統計の母集団が不整合になる）。
     """
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
@@ -485,7 +503,7 @@ def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
             owner_prior_cols = [desc[0] for desc in cur.description]
             owner_prior_df = pd.DataFrame(owner_prior_rows, columns=owner_prior_cols)
 
-            cur.execute(_GLOBAL_PLACE_RATE_QUERY, (race_date,))
+            cur.execute(_GLOBAL_PLACE_RATE_QUERY, (race_date, venues, venues))
             global_place_rate = cur.fetchone()[0]
             global_place_rate = (
                 float(global_place_rate) if global_place_rate is not None else 0.0
@@ -500,6 +518,8 @@ def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
                     sires,
                     course_type,
                     race_date,
+                    venues,
+                    venues,
                 ),
             )
             sire_place_rows = cur.fetchall()
@@ -508,7 +528,7 @@ def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
 
             cur.execute(
                 _SIRE_SPEED_INDEX_QUERY,
-                (_PEDIGREE_K_SPEED_SHRINK, sires, course_type, race_date),
+                (_PEDIGREE_K_SPEED_SHRINK, sires, course_type, race_date, venues, venues),
             )
             sire_speed_rows = cur.fetchall()
             sire_speed_cols = [desc[0] for desc in cur.description]
@@ -520,7 +540,7 @@ def load_predict_data(database_url: str, race_id: str) -> pd.DataFrame:
             pre_odds_df = pd.DataFrame(pre_odds_rows, columns=pre_odds_cols)
 
             distance_band = _get_distance_band(distance)
-            cur.execute(_BRACKET_DISTANCE_AVG_QUERY, (distance_band,))
+            cur.execute(_BRACKET_DISTANCE_AVG_QUERY, (distance_band, venues, venues))
             bracket_rows = cur.fetchall()
             bracket_cols = [desc[0] for desc in cur.description]
             bracket_df = pd.DataFrame(bracket_rows, columns=bracket_cols)

@@ -48,6 +48,7 @@ postgres_data/
 
 # ML models (binary files - managed locally)
 predictor/models/
+predictor/models_regional/
 predictor/embeddings/
 
 # Prediction output
