@@ -265,7 +265,7 @@ def predict_mode(race_id: str) -> None:
 def main() -> None:
     if len(sys.argv) < 2:
         logger.error(
-            "使い方: python -m predictor.main_regional "
+            "使い方: python -m predictor.nar "
             "train [--no-walkforward] [--half-life-days N|none] "
             "| predict <race_id>"
         )
@@ -283,7 +283,7 @@ def main() -> None:
         train_mode(walkforward=walkforward, half_life_days=half_life_days)
     elif command == "predict":
         if len(sys.argv) < 3:
-            logger.error("使い方: python -m predictor.main_regional predict <race_id>")
+            logger.error("使い方: python -m predictor.nar predict <race_id>")
             sys.exit(1)
         predict_mode(sys.argv[2])
     else:

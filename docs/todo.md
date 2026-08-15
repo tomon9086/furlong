@@ -110,7 +110,7 @@
       （11,051件保存・エラー0件、2016年まで到達）。venueコード（42/43/44/45）は2012年時点でも
       現行と同一であることを実データで確認済み
 - [x] 地方競馬専用の特徴量パイプライン（v1）に着手・完了 — 2026-08-15、南関東4場専用の
-      `predictor/predictor/main_regional.py` を新規作成。`preprocessing.py` に `NAR_VENUES`定数・
+      `predictor/predictor/nar.py` を新規作成。`preprocessing.py` に `NAR_VENUES`定数・
       `load_data`/`load_predict_data`の`venues`引数を追加（後方互換、JRA側は無改修）。
       `class_level`/`class_change`/`grade`はNAR表記対応の抽出ロジックが無いためv1では特徴量から除外
       （実データ確認の結果、NARのクラス情報は`race_condition`ではなく`race_name`に入っていることが
