@@ -262,12 +262,57 @@ def predict_mode(race_id: str) -> None:
     )
 
 
+def compare_data_volume_mode() -> None:
+    """学習データの年数（2/4/6/8年・全期間）比較実験を実行し、結果をCSVに保存する。
+
+    30年遡及スクレイピングに投資する価値があるかを判断する材料にする
+    （テスト期間は固定し、学習期間の長さだけを変える）。
+    """
+    from predictor import nar_data_volume_experiment
+    from predictor.preprocessing import NAR_VENUES, load_data, preprocess
+
+    logger.info("データを読み込み中...（対象venue: %s）", NAR_VENUES)
+    raw = load_data(DATABASE_URL, venues=NAR_VENUES)
+    df = preprocess(raw)
+    df = df.drop(columns=_NAR_EXCLUDED_FEATURE_COLUMNS, errors="ignore")
+
+    logger.info("学習データ量比較実験を実行中...")
+    logger.info(
+        "（年数オプションごとに近走成績・累積統計量の再計算を含むため時間がかかります）"
+    )
+    result = nar_data_volume_experiment.run_comparison(df)
+
+    logger.info("--- 学習データ量（年数）比較結果 ---")
+    logger.info(result.to_string())
+
+    path = nar_data_volume_experiment.save_comparison(result)
+    logger.info(f"結果を保存しました: {path}")
+
+
+def data_volume_significance_mode(years_a: int | None, years_b: int | None) -> None:
+    """2つの学習期間（例: 2年 vs 全期間）の性能差をペアードbootstrapで検定する。"""
+    from predictor import nar_data_volume_experiment
+    from predictor.preprocessing import NAR_VENUES, load_data, preprocess
+
+    logger.info("データを読み込み中...（対象venue: %s）", NAR_VENUES)
+    raw = load_data(DATABASE_URL, venues=NAR_VENUES)
+    df = preprocess(raw)
+    df = df.drop(columns=_NAR_EXCLUDED_FEATURE_COLUMNS, errors="ignore")
+
+    result = nar_data_volume_experiment.significance_test(df, years_a, years_b)
+    label_a = result.attrs.get("label_a")
+    label_b = result.attrs.get("label_b")
+    logger.info(f"--- 有意差検定結果（{label_a} vs {label_b}, 差=b-a, 95%CI）---")
+    logger.info(result.to_string())
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         logger.error(
             "使い方: python -m predictor.nar "
             "train [--no-walkforward] [--half-life-days N|none] "
-            "| predict <race_id>"
+            "| predict <race_id> | compare-data-volume "
+            "| data-volume-significance <years_a|none> <years_b|none>"
         )
         sys.exit(1)
 
@@ -286,6 +331,18 @@ def main() -> None:
             logger.error("使い方: python -m predictor.nar predict <race_id>")
             sys.exit(1)
         predict_mode(sys.argv[2])
+    elif command == "compare-data-volume":
+        compare_data_volume_mode()
+    elif command == "data-volume-significance":
+        if len(sys.argv) < 4:
+            logger.error(
+                "使い方: python -m predictor.nar "
+                "data-volume-significance <years_a|none> <years_b|none>"
+            )
+            sys.exit(1)
+        years_a = None if sys.argv[2].lower() == "none" else int(sys.argv[2])
+        years_b = None if sys.argv[3].lower() == "none" else int(sys.argv[3])
+        data_volume_significance_mode(years_a, years_b)
     else:
         logger.error(f"不明なコマンド: {command}")
         sys.exit(1)
