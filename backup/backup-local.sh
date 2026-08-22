@@ -26,11 +26,17 @@ OUTPUT_FILE="$BACKUP_DIR/${PGDATABASE}_${TIMESTAMP}.sql.gz"
 
 export PGPASSWORD
 
-pg_dump \
-  -h "$PGHOST" \
-  -p "$PGPORT" \
-  -U "$PGUSER" \
-  "$PGDATABASE" \
-  | gzip > "$OUTPUT_FILE"
+if command -v pg_dump >/dev/null 2>&1; then
+  pg_dump \
+    -h "$PGHOST" \
+    -p "$PGPORT" \
+    -U "$PGUSER" \
+    "$PGDATABASE" \
+    | gzip > "$OUTPUT_FILE"
+else
+  # ホストに pg_dump が無い場合は db コンテナ内の pg_dump を使う
+  (cd "$REPO_ROOT" && docker compose exec -T db pg_dump -U "$PGUSER" "$PGDATABASE") \
+    | gzip > "$OUTPUT_FILE"
+fi
 
 echo "Backup saved: $OUTPUT_FILE"
