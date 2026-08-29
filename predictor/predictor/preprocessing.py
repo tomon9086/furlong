@@ -769,8 +769,12 @@ def preprocess(df: pd.DataFrame, keep_null_position: bool = False) -> pd.DataFra
 
     # クラス変化（前走との差）: predict 時は prev_race_condition が SQL から来る
     if "prev_race_condition" in df.columns:
-        prev_class_level = df["prev_race_condition"].apply(_extract_class_level)
-        df["class_change"] = df["class_level"] - prev_class_level
+        prev_class_level = pd.to_numeric(
+            df["prev_race_condition"].apply(_extract_class_level), errors="coerce"
+        )
+        df["class_change"] = pd.to_numeric(
+            df["class_level"] - prev_class_level, errors="coerce"
+        )
         df = df.drop(columns=["prev_race_condition"])
 
     # 出走間隔（前走からの経過日数）: predict 時は prev_race_date が SQL から来る
