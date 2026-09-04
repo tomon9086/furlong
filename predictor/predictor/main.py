@@ -709,6 +709,27 @@ def _parse_tuned_params(argv: list[str]) -> dict | None:
     return params or None
 
 
+def _check_db_connection() -> None:
+    """DB への疎通を確認し、失敗したら即座にエラー終了する。
+
+    スクレイピングやモデルロードに入る前に呼ぶことで、DB 未起動時に
+    分かりにくい traceback を延々と出さず早期に落とす。
+    """
+    import psycopg
+
+    try:
+        with psycopg.connect(DATABASE_URL, connect_timeout=5):
+            pass
+    except psycopg.OperationalError as e:
+        logger.error(
+            "DB に接続できません。PostgreSQL が起動しているか確認してください "
+            "（例: `docker compose up -d`）。\n"
+            f"  DATABASE_URL={DATABASE_URL}\n"
+            f"  {e}"
+        )
+        sys.exit(1)
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         logger.error(
@@ -724,6 +745,8 @@ def main() -> None:
         sys.exit(1)
 
     command = sys.argv[1]
+
+    _check_db_connection()
 
     if command == "train":
         walkforward = "--no-walkforward" not in sys.argv
