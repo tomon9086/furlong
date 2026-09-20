@@ -201,16 +201,21 @@ def _mark_recommended(
                 if strat_ev is not None:
                     df.loc[idx[positions], f"ev_{strat.name}"] = strat_ev
 
-        # 複勝: place_prob 上位3頭
+        # 複勝: place_prob 上位3頭（isotonic較正のステップ関数特性で複数馬の
+        # place_prob が完全一致するtieが起こり得るため、rank(method="min") では
+        # 3頭を超えて選出されることがあった。常にちょうど3頭に固定する（ADR-0031）。
         place_prob_vals = (
             group["place_prob"].to_numpy(dtype=float)
             if "place_prob" in group.columns
             else win_probs_raw
         )
-        place_ranks = pd.Series(place_prob_vals, index=idx).rank(
-            ascending=False, method="min"
-        )
-        df.loc[place_ranks[place_ranks <= 3].index, "recommended_place"] = True
+        n_valid_place = int(np.sum(~np.isnan(place_prob_vals)))
+        k_place = min(3, n_valid_place)
+        if k_place > 0:
+            top_place_positions = np.argsort(-place_prob_vals, kind="stable")[
+                :k_place
+            ]
+            df.loc[idx[top_place_positions], "recommended_place"] = True
 
         # 馬連: MC 馬連確率最大ペア
         if n >= 2 and not top1_is_longshot:
