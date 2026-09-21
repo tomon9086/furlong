@@ -17,6 +17,37 @@ _TIMEOUT = 30
 _MAX_RETRIES = 20
 _RETRY_STATUS = {429, 500, 502, 503, 504}
 
+# レース一覧ページ (/race/list.html) の track[]・jyo[] チェックボックスの全選択値。
+# track: 1=芝, 2=ダート, 3=障害。jyo: JRA10場 + 地方競馬場（ばんえいの65を含む）。
+_ALL_TRACK_TYPES = ["1", "2", "3"]
+_ALL_VENUE_CODES = [
+    "01",
+    "02",
+    "03",
+    "04",
+    "05",
+    "06",
+    "07",
+    "08",
+    "09",
+    "10",
+    "30",
+    "35",
+    "36",
+    "42",
+    "43",
+    "44",
+    "45",
+    "46",
+    "47",
+    "48",
+    "50",
+    "51",
+    "54",
+    "55",
+    "65",
+]
+
 
 class NetkeibaClient:
     """netkeiba.com へのリクエストを管理するクライアント."""
@@ -46,14 +77,29 @@ class NetkeibaClient:
         page: int = 1,
         list_size: int = 100,
     ) -> str:
-        """レース一覧ページを取得してHTMLを返す."""
-        url = (
-            f"{_BASE_URL}/?pid=race_list"
-            f"&start_year={start_year}&start_mon={start_mon}"
-            f"&end_year={end_year}&end_mon={end_mon}"
-            f"&sort=date&list={list_size}&page={page}"
-        )
-        return self._get(url)
+        """レース一覧ページを取得してHTMLを返す.
+
+        旧エンドポイント (`/?pid=race_list`) は2026年頃に廃止され、常にエラーページを
+        返すようになった。現行の一覧ページ (`/race/list.html`) を叩く。venueで絞り込む
+        場合も `jyo[]` は常に全場を指定し、絞り込みは呼び出し側（main.py）で行う。
+        """
+        url = f"{_BASE_URL}/race/list.html"
+        params = {
+            "word": "",
+            "match": "p",
+            "track[]": _ALL_TRACK_TYPES,
+            "yf": start_year,
+            "mf": start_mon,
+            "yt": end_year,
+            "mt": end_mon,
+            "jyo[]": _ALL_VENUE_CODES,
+            "kf": "",
+            "kt": "",
+            "sort": "date-desc",
+            "limit": list_size,
+            "page": page,
+        }
+        return self._get(url, params=params)
 
     def get_race(self, race_id: str) -> str:
         """レース詳細ページを取得してHTMLを返す."""

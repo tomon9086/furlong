@@ -1,4 +1,4 @@
-"""レース一覧ページ HTMLパーサー (db.netkeiba.com/?pid=race_list)."""
+"""レース一覧ページ HTMLパーサー (db.netkeiba.com/race/list.html)."""
 
 import re
 
@@ -9,10 +9,11 @@ class RaceListParser(BaseParser):
     """レース一覧ページのパーサー.
 
     URL 例:
-        https://db.netkeiba.com/?pid=race_list
-            &start_year=2026&start_mon=1
-            &end_year=2026&end_mon=1
-            &sort=date&list=20&page=1
+        https://db.netkeiba.com/race/list.html
+            ?word=&match=p&track[]=1&track[]=2&track[]=3
+            &yf=2026&mf=1&yt=2026&mt=1
+            &jyo[]=01&jyo[]=02&...
+            &kf=&kt=&sort=date-desc&limit=100&page=1
     """
 
     def parse(self, html: str) -> list[str]:
@@ -48,7 +49,7 @@ class RaceListParser(BaseParser):
             return 1
 
         text = pager.get_text(strip=True)
-        m = re.search(r"([\d,]+)件中(\d+)[~〜](\d+)件目", text)
+        m = re.search(r"([\d,]+)件中\s*(\d+)(?:から|[~〜])(\d+)件目", text)
         if not m:
             return 1
 
