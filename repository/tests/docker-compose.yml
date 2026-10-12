@@ -1,0 +1,20 @@
+# 統合テスト用の PostgreSQL（pytest-docker が docker compose で起動・破棄する）
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: test
+    # ホスト側のポートは空いているものを自動で割り当てる
+    ports:
+      - "127.0.0.1::5432"
+    # データはテストごとに使い捨てるのでディスクに書かない
+    tmpfs:
+      - /var/lib/postgresql/data
+    # docker compose up --wait がこの healthcheck の通過を待つ
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d test"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
