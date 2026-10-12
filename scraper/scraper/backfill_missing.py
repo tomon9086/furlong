@@ -70,12 +70,18 @@ WHERE rr.trainer_id IS NOT NULL
 ORDER BY rr.trainer_id
 """
 
+# 結果（着順・払い戻し）が無いレース。出馬表だけ保存されたまま開催日を過ぎたものを含む
 _Q_MISSING_RACES = """
 SELECT r.race_id
 FROM races r
 WHERE NOT EXISTS (
     SELECT 1 FROM race_results rr
     WHERE rr.race_id = r.race_id
+      AND rr.finishing_position IS NOT NULL
+)
+  AND NOT EXISTS (
+    SELECT 1 FROM payoffs p
+    WHERE p.race_id = r.race_id
 )
   AND TO_DATE(r.date, 'YYYY/MM/DD') < CURRENT_DATE
 ORDER BY r.date DESC

@@ -372,6 +372,36 @@ class Database:
                 )
                 return {row[0] for row in cur.fetchall()}
 
+    def get_race_ids_with_results(self, race_ids: list[str]) -> set[str]:
+        """指定されたレースIDのうち、結果（着順または払い戻し）が保存済みのものを返す.
+
+        出馬表だけ保存したレースは races に行があっても着順が NULL・払い戻しなしのため
+        含まれない。着順が空でも払い戻しがあるレース（古い地方競馬に多い）は含まれる。
+        """
+        if not race_ids:
+            return set()
+        with psycopg.connect(self._database_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT r.race_id
+                    FROM races r
+                    WHERE r.race_id = ANY(%s)
+                      AND (
+                        EXISTS (
+                            SELECT 1 FROM race_results rr
+                            WHERE rr.race_id = r.race_id
+                              AND rr.finishing_position IS NOT NULL
+                        )
+                        OR EXISTS (
+                            SELECT 1 FROM payoffs p WHERE p.race_id = r.race_id
+                        )
+                      )
+                    """,
+                    (race_ids,),
+                )
+                return {row[0] for row in cur.fetchall()}
+
     def save_pre_race_odds(
         self,
         race_id: str,

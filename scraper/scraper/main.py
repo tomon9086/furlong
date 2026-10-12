@@ -300,8 +300,8 @@ def scrape_backfill(
             all_race_ids = [rid for rid in all_race_ids if rid[4:6] in venue_codes]
             logger.info("venueフィルタ後のレース数: %d", len(all_race_ids))
 
-        # DB に未登録のレースだけ対象にする
-        existing_ids = db.get_existing_race_ids(all_race_ids)
+        # 結果が未保存のレースだけ対象にする（出馬表だけ保存済みのレースも取得する）
+        existing_ids = db.get_race_ids_with_results(all_race_ids)
         missing_ids = [rid for rid in all_race_ids if rid not in existing_ids]
         if limit is not None:
             missing_ids = missing_ids[:limit]
