@@ -81,6 +81,9 @@ docker compose exec db psql -U furlong -d furlong
 # scraper
 uv run --package furlong-scraper python -m scraper.main
 
+# DB に入っている最新データの日付を確認（結果取得済みの最新開催日・結果未取得レース・最終書き込み時刻）
+uv run --package furlong-scraper python -m scraper.check_latest
+
 # predictor: モデル学習
 uv run --package furlong-predictor python -m predictor.main train
 
