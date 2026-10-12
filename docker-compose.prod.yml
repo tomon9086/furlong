@@ -42,6 +42,8 @@ services:
     restart: always
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      # 設定するとスケジューラのジョブ失敗時に ntfy.sh へ通知する（未設定なら通知しない）
+      NTFY_TOPIC_URL: ${NTFY_TOPIC_URL:-}
     depends_on:
       db:
         condition: service_healthy

@@ -3,10 +3,14 @@
 APScheduler を使い、以下の定期バッチを実行する:
   - 14:00 : scrape_shutuba_upcoming() — 翌日の出馬表を収集（枠順・調教タイム確定後）
   - 22:00 : scrape_incremental()  — 当日までの差分レース結果を収集（全レース終了後）
+
+ジョブが例外で終了した場合、環境変数 NTFY_TOPIC_URL が設定されていれば ntfy.sh に通知する。
 """
 
 import logging
+import os
 
+import httpx
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -16,12 +20,29 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 
+def _notify(message: str) -> None:
+    """NTFY_TOPIC_URL が設定されていれば ntfy.sh に通知する。通知の失敗はログに残すだけにする."""
+    url = os.environ.get("NTFY_TOPIC_URL")
+    if not url:
+        return
+    try:
+        httpx.post(
+            url,
+            content=message.encode("utf-8"),
+            headers={"Title": "furlong scraper"},
+            timeout=10,
+        ).raise_for_status()
+    except Exception:
+        logger.exception("ntfy への通知に失敗しました。")
+
+
 def _job_incremental() -> None:
     logger.info("=== [scheduler] scrape_incremental 開始 ===")
     try:
         scrape_incremental()
-    except Exception:
+    except Exception as e:
         logger.exception("scrape_incremental でエラーが発生しました。")
+        _notify(f"scrape_incremental でエラーが発生しました: {type(e).__name__}: {e}")
     logger.info("=== [scheduler] scrape_incremental 完了 ===")
 
 
@@ -29,8 +50,9 @@ def _job_shutuba() -> None:
     logger.info("=== [scheduler] scrape_shutuba_upcoming 開始 ===")
     try:
         scrape_shutuba_upcoming()
-    except Exception:
+    except Exception as e:
         logger.exception("scrape_shutuba_upcoming でエラーが発生しました。")
+        _notify(f"scrape_shutuba_upcoming でエラーが発生しました: {type(e).__name__}: {e}")
     logger.info("=== [scheduler] scrape_shutuba_upcoming 完了 ===")
 
 
