@@ -57,6 +57,7 @@ CREATE TABLE races (
     grade           varchar(20),
     start_time      varchar(10),
     head_count      integer,
+    race_condition  text,
     raw_data        text,
     created_at      timestamp    NOT NULL,
     updated_at      timestamp    NOT NULL,
