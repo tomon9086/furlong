@@ -169,3 +169,43 @@ class TestSaveHorse:
 
         assert count == 1
         assert name == "新馬名"
+
+
+class TestGetRaceIdsWithResults:
+    def test_excludes_shutuba_only_race(self, db: Database) -> None:
+        """出馬表だけ保存したレース（着順なし・払い戻しなし）は含まれない。"""
+        db.save_race(
+            "R101",
+            {"レース名": "出馬表のみ"},
+            results=[{"馬番": "1", "馬名": "テストウマA"}],
+        )
+
+        assert db.get_race_ids_with_results(["R101"]) == set()
+
+    def test_includes_race_with_finishing_position(self, db: Database) -> None:
+        """着順が保存されたレースは含まれる。"""
+        db.save_race(
+            "R102",
+            {"レース名": "結果あり"},
+            results=[{"馬番": "1", "着順": "1"}],
+        )
+
+        assert db.get_race_ids_with_results(["R102"]) == {"R102"}
+
+    def test_includes_race_with_payoffs_only(self, db: Database) -> None:
+        """着順が空でも払い戻しがあるレースは含まれる。"""
+        db.save_race(
+            "R103",
+            {"レース名": "払い戻しのみ"},
+            results=[{"馬番": "1"}],
+            payoffs=[{"券種": "単勝", "組番": "1", "払戻金": "100", "人気": "1"}],
+        )
+
+        assert db.get_race_ids_with_results(["R103"]) == {"R103"}
+
+    def test_shutuba_then_result_is_included(self, db: Database) -> None:
+        """出馬表を保存した後に結果で上書きすると含まれるようになる。"""
+        db.save_race("R104", {"レース名": "出馬表"}, results=[{"馬番": "1"}])
+        db.save_race("R104", {"レース名": "結果"}, results=[{"馬番": "1", "着順": "1"}])
+
+        assert db.get_race_ids_with_results(["R104", "R999"]) == {"R104"}
