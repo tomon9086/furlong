@@ -1,8 +1,8 @@
 """スクレイパースケジューラ
 
 APScheduler を使い、以下の定期バッチを実行する:
-  - 14:00 : scrape_incremental()  — 当月までの差分レース結果を収集
-  - 22:00 : scrape_shutuba_upcoming() — 翌日の出馬表を収集
+  - 14:00 : scrape_shutuba_upcoming() — 翌日の出馬表を収集（枠順・調教タイム確定後）
+  - 22:00 : scrape_incremental()  — 当日までの差分レース結果を収集（全レース終了後）
 """
 
 import logging
@@ -38,24 +38,24 @@ def main() -> None:
     scheduler = BlockingScheduler(timezone="Asia/Tokyo")
 
     scheduler.add_job(
-        _job_incremental,
+        _job_shutuba,
         trigger=CronTrigger(hour=14, minute=0, timezone="Asia/Tokyo"),
-        id="scrape_incremental",
-        name="差分レース結果収集 (14:00)",
+        id="scrape_shutuba_upcoming",
+        name="翌日出馬表収集 (14:00)",
         max_instances=1,
         misfire_grace_time=3600,
     )
 
     scheduler.add_job(
-        _job_shutuba,
+        _job_incremental,
         trigger=CronTrigger(hour=22, minute=0, timezone="Asia/Tokyo"),
-        id="scrape_shutuba_upcoming",
-        name="翌日出馬表収集 (22:00)",
+        id="scrape_incremental",
+        name="差分レース結果収集 (22:00)",
         max_instances=1,
         misfire_grace_time=3600,
     )
 
-    logger.info("スケジューラを起動しました。14:00 に差分収集、22:00 に出馬表収集を実行します。")
+    logger.info("スケジューラを起動しました。14:00 に出馬表収集、22:00 に差分収集を実行します。")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
