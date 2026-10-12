@@ -1,15 +1,15 @@
 """統合テスト用 pytest フィクスチャ."""
 
 import pathlib
-from collections.abc import Generator
 
 import psycopg
 import pytest
-from testcontainers.postgres import PostgresContainer
+from pytest_docker.plugin import Services
 
 from repository.database import Database
 
-_SCHEMA_PATH = pathlib.Path(__file__).parent.parent.parent / "db" / "schema.sql"
+_TESTS_DIR = pathlib.Path(__file__).parent
+_SCHEMA_PATH = _TESTS_DIR.parent.parent / "db" / "schema.sql"
 
 _ALL_TABLES = [
     "payoffs",
@@ -22,21 +22,20 @@ _ALL_TABLES = [
 
 
 @pytest.fixture(scope="session")
-def pg_container() -> Generator[PostgresContainer, None, None]:
-    """テストセッション中に PostgreSQL コンテナを1つ起動・停止する。"""
-    with PostgresContainer("postgres:16") as container:
-        yield container
+def docker_compose_file() -> str:
+    """pytest-docker が起動する compose ファイル（tests/docker-compose.yml）。"""
+    return str(_TESTS_DIR / "docker-compose.yml")
 
 
 @pytest.fixture(scope="session")
-def db_url(pg_container: PostgresContainer) -> str:
-    """スキーマを適用し、接続 URL を返す（セッション中1回のみ実行）。"""
-    host = pg_container.get_container_host_ip()
-    port = pg_container.get_exposed_port(5432)
-    url = (
-        f"postgresql://{pg_container.username}:{pg_container.password}"
-        f"@{host}:{port}/{pg_container.dbname}"
-    )
+def db_url(docker_ip: str, docker_services: Services) -> str:
+    """テスト用 PostgreSQL にスキーマを適用し、接続 URL を返す（セッション中1回のみ）。
+
+    コンテナは docker compose 経由で起動するため、docker コマンドが使える環境
+    （アクティブな docker context）であれば追加の設定なしで動く。
+    """
+    port = docker_services.port_for("db", 5432)
+    url = f"postgresql://test:test@{docker_ip}:{port}/test"
     schema_sql = _SCHEMA_PATH.read_text()
     with psycopg.connect(url) as conn:
         conn.execute(schema_sql)
