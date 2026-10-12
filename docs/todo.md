@@ -138,5 +138,6 @@
 - [ ] `predictor/predictor/api.py` を実装（`GET /health`・`GET /predict/{race_id}` エンドポイント）
 - [ ] サーバ起動時にモデルを1回だけロードする仕組みを `api.py` に実装
 - [ ] `docker-compose.yml` に api サービス（port 8000）を追加
+- [ ] `api.py` 実装後、`docker-compose.prod.yml` の api サービスから `profiles: ["api"]` を外して既定で起動させる
 
 
