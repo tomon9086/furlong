@@ -38,3 +38,5 @@
 | 2026-08-10 | `dam`フィーチャー除外（permutation importance検定で有意な寄与なしと判明） | Accepted | [ADR-0030](./adr/0030-dam-feature-removed.md) |
 | 2026-09-20 | 複勝推奨の選出を常にちょうど上位3頭に固定（isotonic較正の縮退によるtieでoverflowしていた問題を修正） | Accepted | [ADR-0031](./adr/0031-place-recommendation-exact-top3-selection.md) |
 | 2026-09-20 | 複勝較正をsigmoidに変更する案（tie解消目的） | Rejected | [ADR-0032](./adr/0032-sigmoid-place-calibration-rejected.md) |
+| 2026-10-16 | JRA の学習データを4場から10場に拡張（6場の補完後。logloss・的中率は有意に改善、1位馬単勝の回収率は walk-forward で有意に悪化） | Accepted | [ADR-0033](./adr/0033-jra-10-venues-training-data.md) |
+| 2026-10-16 | 三連複確率の補正（着順別ディスカウント・複勝モデルとの整合）。あわせてモデルが市場（単勝オッズ由来）に3着内の予想で大きく負けていると判明 | Rejected | [ADR-0034](./adr/0034-trio-probability-discount-and-place-matching.md) |
