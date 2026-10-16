@@ -1,5 +1,6 @@
 """データベース保存ヘルパー (psycopg3 + PostgreSQL)."""
 
+import gzip
 import json
 import logging
 import re
@@ -10,6 +11,7 @@ import psycopg
 from .models import (
     HorseProfile,
     JockeyProfile,
+    OddsRow,
     PayoffRow,
     PreRaceOddsRow,
     RaceDetailRow,
@@ -32,6 +34,24 @@ def _parse_distance(value: str | None) -> int | None:
         return None
     m = re.search(r"(\d+)", value)
     return int(m.group(1)) if m else None
+
+
+def _parse_float(value: str | None) -> float | None:
+    if not value:
+        return None
+    try:
+        return float(value.replace(",", ""))
+    except ValueError:
+        return None
+
+
+# final_odds に展開する券種（三連単=8 は行数が多いため odds_snapshots にのみ保存）
+_FINAL_ODDS_BET_TYPES = {"1", "2", "3", "4", "5", "6", "7"}
+# オッズ上限（[1] 要素）を持つ券種: 複勝・ワイド
+_RANGE_ODDS_BET_TYPES = {"2", "5"}
+
+# JRA 10場の venue コード（race_id の5〜6桁目）
+_JRA_VENUE_CODES = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10"]
 
 
 def _parse_horse_weight(value: str | None) -> int | None:
@@ -425,6 +445,132 @@ class Database:
             race_id,
             len(rows),
         )
+
+    def save_odds_snapshot(
+        self,
+        race_id: str,
+        payload: str,
+        status: str,
+        official_datetime: str | None,
+        rows: list[OddsRow],
+        fetched_at: datetime | None = None,
+    ) -> int:
+        """オッズ API の応答を odds_snapshots に保存する.
+
+        確定オッズ（status=result）なら final_odds にも展開する。
+
+        Args:
+            race_id: 対象レースID。
+            payload: API の応答（JSON 文字列）。gzip 圧縮して保存する。
+            status: API の status（result=確定 のときだけ final_odds を置き換える）。
+            official_datetime: API の official_datetime（"YYYY-MM-DD HH:MM:SS"）。
+            rows: AllOddsParser.parse() の rows。
+            fetched_at: 取得日時。省略時は現在時刻を使用。
+
+        Returns:
+            final_odds に保存した行数（status が result 以外なら 0）。
+        """
+        now = datetime.now()
+        ts = fetched_at if fetched_at is not None else now
+        official_ts = (
+            datetime.strptime(official_datetime, "%Y-%m-%d %H:%M:%S")
+            if official_datetime
+            else None
+        )
+
+        final_rows: list[tuple] = []
+        if status == "result":
+            for row in rows:
+                bet_type = row.get("券種")
+                if bet_type not in _FINAL_ODDS_BET_TYPES:
+                    continue
+                odds = _parse_float(row.get("オッズ"))
+                if odds is None:
+                    continue
+                odds_max = (
+                    _parse_float(row.get("オッズ上限"))
+                    if bet_type in _RANGE_ODDS_BET_TYPES
+                    else None
+                )
+                popularity_text = row.get("人気") or ""
+                popularity = int(popularity_text) if popularity_text.isdigit() else None
+                final_rows.append(
+                    (
+                        race_id,
+                        int(bet_type),
+                        row.get("組番"),
+                        odds,
+                        odds_max,
+                        popularity,
+                    )
+                )
+
+        with psycopg.connect(self._database_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO odds_snapshots (
+                        race_id, fetched_at, status, official_datetime,
+                        payload, created_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        race_id,
+                        ts,
+                        status,
+                        official_ts,
+                        gzip.compress(payload.encode("utf-8")),
+                        now,
+                    ),
+                )
+                if status == "result":
+                    cur.execute("DELETE FROM final_odds WHERE race_id = %s", (race_id,))
+                    cur.executemany(
+                        """
+                        INSERT INTO final_odds (
+                            race_id, bet_type, combination, odds, odds_max, popularity
+                        ) VALUES (%s, %s, %s, %s, %s, %s)
+                        """,
+                        final_rows,
+                    )
+
+        return len(final_rows)
+
+    def get_race_ids_with_odds_snapshot(
+        self, race_ids: list[str], statuses: tuple[str, ...] = ("result", "NG")
+    ) -> set[str]:
+        """指定レースIDのうち、指定 status の odds_snapshots を持つものを返す.
+
+        既定では確定オッズ取得済み（result）と取得不可（NG）のレースを返す。
+        どちらも再取得しても結果が変わらないため、バックフィルの再開時に飛ばす対象になる。
+        """
+        if not race_ids:
+            return set()
+        with psycopg.connect(self._database_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT race_id FROM odds_snapshots
+                    WHERE race_id = ANY(%s) AND status = ANY(%s)
+                    """,
+                    (race_ids, list(statuses)),
+                )
+                return {row[0] for row in cur.fetchall()}
+
+    def get_jra_race_ids(self, start_year: int, end_year: int) -> list[str]:
+        """指定期間（年単位、両端含む）の JRA 10場のレースIDを新しい順に返す."""
+        with psycopg.connect(self._database_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT race_id FROM races
+                    WHERE substr(race_id, 5, 2) = ANY(%s)
+                      AND substr(race_id, 1, 4)::int BETWEEN %s AND %s
+                    ORDER BY race_id DESC
+                    """,
+                    (_JRA_VENUE_CODES, start_year, end_year),
+                )
+                return [row[0] for row in cur.fetchall()]
 
     def get_latest_race_date(self) -> tuple[int, int] | None:
         """DB に登録されている最新レースの (year, month) を返す。レースが1件もない場合は None を返す."""

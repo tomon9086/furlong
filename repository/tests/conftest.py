@@ -12,6 +12,8 @@ _TESTS_DIR = pathlib.Path(__file__).parent
 _SCHEMA_PATH = _TESTS_DIR.parent.parent / "db" / "schema.sql"
 
 _ALL_TABLES = [
+    "final_odds",
+    "odds_snapshots",
     "payoffs",
     "race_results",
     "races",

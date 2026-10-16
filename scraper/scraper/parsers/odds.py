@@ -1,10 +1,11 @@
-"""単勝オッズ JSON パーサー (race.netkeiba.com/api/api_get_jra_odds.html)."""
+"""オッズ JSON パーサー (race.netkeiba.com/api/api_get_jra_odds.html)."""
 
 import json
 import logging
+from typing import NamedTuple
 
 from .base import BaseParser
-from repository.models import PreRaceOddsRow
+from repository.models import OddsRow, PreRaceOddsRow
 
 logger = logging.getLogger(__name__)
 
@@ -53,3 +54,63 @@ class OddsParser(BaseParser):
             raise ValueError("単勝オッズデータ行が見つかりません")
 
         return rows
+
+
+class AllOddsResult(NamedTuple):
+    """AllOddsParser.parse() の戻り値."""
+
+    status: str
+    official_datetime: str | None
+    rows: list[OddsRow]
+
+
+class AllOddsParser(BaseParser):
+    """オッズ API (type=all) の JSON レスポンスから全券種のオッズを抽出するパーサー.
+
+    ``data.odds`` のキーは券種（1=単勝 2=複勝 3=枠連 4=馬連 5=ワイド 6=馬単
+    7=三連複 8=三連単）、値は人気順をキーにした
+    ``[オッズ, オッズ上限(複勝・ワイドのみ。他は "0.0"), 人気, 組番]`` の dict。
+    """
+
+    def parse(self, payload: str) -> AllOddsResult:
+        """JSON レスポンス文字列を受け取り、status・確定時刻・全券種のオッズ行を返す.
+
+        取得できない（status=NG など）場合も例外にせず、rows を空にして status を返す。
+        取得不可のレースを呼び出し側で記録し、再取得の対象から外せるようにするため。
+        """
+        try:
+            doc = json.loads(payload)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"オッズ JSON のパースに失敗しました: {e}") from e
+
+        status = str(doc.get("status") or "")
+        data = doc.get("data")
+        if not isinstance(data, dict):
+            return AllOddsResult(status, None, [])
+
+        official_datetime = data.get("official_datetime") or None
+        odds_by_type = data.get("odds")
+        if not isinstance(odds_by_type, dict):
+            return AllOddsResult(status, official_datetime, [])
+
+        rows: list[OddsRow] = []
+        for bet_type, entries in odds_by_type.items():
+            if not isinstance(entries, dict):
+                continue
+            for entry in entries.values():
+                if not isinstance(entry, list) or len(entry) < 4:
+                    continue
+                combination = str(entry[3]).strip()
+                if not combination.isdigit():
+                    continue
+                rows.append(
+                    {
+                        "券種": str(bet_type),
+                        "組番": combination,
+                        "オッズ": str(entry[0]).strip(),
+                        "オッズ上限": str(entry[1]).strip(),
+                        "人気": str(entry[2]).strip(),
+                    }
+                )
+
+        return AllOddsResult(status, official_datetime, rows)

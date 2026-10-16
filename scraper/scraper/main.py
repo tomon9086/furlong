@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from .client import NetkeibaClient
 from repository import Database
 from .parsers import (
+    AllOddsParser,
     HorseParser,
     JockeyParser,
     OddsParser,
@@ -414,6 +415,84 @@ def scrape_regional_backfill(
     logger.info("地方競馬遡及バックフィル完了: 累計 %d件保存", total)
 
 
+def scrape_odds_backfill(
+    start_year: int, end_year: int, limit: int | None = None
+) -> None:
+    """DB にある JRA レースの確定オッズ（全券種）を遡及取得する.
+
+    新しいレースから順に、オッズ API（type=all）の応答を odds_snapshots に保存し、
+    確定オッズ（status=result）は final_odds に展開する。確定オッズ取得済み・取得不可
+    （status=NG。2007年6月以前など）のレースは飛ばすので、途中で止めても同じ
+    コマンドで再開できる。
+
+    Parameters
+    ----------
+    limit : int | None
+        指定した場合、この呼び出しで取得するレース数をその上限で打ち切る（試験実行用）。
+    """
+    parser = AllOddsParser()
+    db = Database(DATABASE_URL)
+
+    race_ids = db.get_jra_race_ids(start_year, end_year)
+    done = db.get_race_ids_with_odds_snapshot(race_ids)
+    targets = [rid for rid in race_ids if rid not in done]
+    if limit is not None:
+        targets = targets[:limit]
+    logger.info(
+        "オッズバックフィル: 期間=%d〜%d年 対象 %d件"
+        "（取得済み・取得不可 %d件はスキップ）",
+        start_year,
+        end_year,
+        len(targets),
+        len(done),
+    )
+
+    counts = {"result": 0, "other": 0, "failed": 0}
+    with NetkeibaClient() as client:
+        for i, race_id in enumerate(targets, start=1):
+            try:
+                payload = client.get_odds(race_id)
+                parsed = parser.parse(payload)
+                n = db.save_odds_snapshot(
+                    race_id,
+                    payload,
+                    parsed.status,
+                    parsed.official_datetime,
+                    parsed.rows,
+                )
+            except Exception:
+                counts["failed"] += 1
+                logger.exception(
+                    "レース %s のオッズ取得に失敗しました。スキップします。", race_id
+                )
+                continue
+            if parsed.status == "result":
+                counts["result"] += 1
+                logger.info(
+                    "[%d/%d] レース %s: 確定オッズ %d 行を保存",
+                    i,
+                    len(targets),
+                    race_id,
+                    n,
+                )
+            else:
+                counts["other"] += 1
+                logger.warning(
+                    "[%d/%d] レース %s: 確定オッズなし (status=%s)",
+                    i,
+                    len(targets),
+                    race_id,
+                    parsed.status,
+                )
+
+    logger.info(
+        "オッズバックフィル完了: 確定 %d件 / 確定以外 %d件 / 失敗 %d件",
+        counts["result"],
+        counts["other"],
+        counts["failed"],
+    )
+
+
 def scrape_shutuba_upcoming(target_date: date | None = None) -> None:
     """翌日（または指定日）の未取得出馬表を検索して保存する.
 
@@ -494,6 +573,15 @@ def main() -> None:
             "(venue_codesはカンマ区切り。直近月から過去に向かって取得。"
             "--limitは累計保存件数の上限＝パイロット実行用)"
         )
+        print(
+            "  mode=odds_backfill     例: python -m scraper odds_backfill "
+            "2008 2025 [--limit 20]"
+        )
+        print(
+            "                             "
+            "(DB にある JRA レースの確定オッズ・全券種を新しい順に取得。"
+            "取得済みは飛ばす)"
+        )
         sys.exit(1)
 
     mode = sys.argv[1]
@@ -564,6 +652,19 @@ def main() -> None:
         scrape_regional_backfill(
             venue_codes, start_year, start_mon, end_year, end_mon, limit=limit
         )
+    elif mode == "odds_backfill":
+        if len(sys.argv) < 4:
+            print(
+                "使用方法: python -m scraper odds_backfill "
+                "<start_year> <end_year> [--limit N]"
+            )
+            print("  例: python -m scraper odds_backfill 2008 2025 --limit 20")
+            sys.exit(1)
+        limit = None
+        if "--limit" in sys.argv:
+            idx = sys.argv.index("--limit")
+            limit = int(sys.argv[idx + 1])
+        scrape_odds_backfill(int(sys.argv[2]), int(sys.argv[3]), limit=limit)
     else:
         print(f"不明なmode: {mode}")
         sys.exit(1)

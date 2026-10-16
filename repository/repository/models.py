@@ -101,6 +101,16 @@ class PreRaceOddsRow(TypedDict, total=False):
     単勝オッズ: str
 
 
+class OddsRow(TypedDict, total=False):
+    """オッズ API の1行（券種×組番ごと）."""
+
+    券種: str
+    組番: str
+    オッズ: str
+    オッズ上限: str
+    人気: str
+
+
 class HorseRaceResult(TypedDict, total=False):
     """馬の競走成績の1行."""
 
