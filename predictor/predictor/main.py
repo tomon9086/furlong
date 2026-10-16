@@ -554,6 +554,31 @@ def compare_half_life_mode() -> None:
     logger.info(f"結果を保存しました: {path}")
 
 
+def compare_venues_mode() -> None:
+    """JRA 学習データの開催場拡張（4場 → 10場）の比較実験を実行し、結果を CSV に保存する。"""
+    from predictor import venue_expansion_experiment
+    from predictor.preprocessing import JRA_VENUES, load_data, preprocess
+
+    logger.info("データを読み込み中...")
+    raw = load_data(DATABASE_URL, venues=JRA_VENUES)
+    df = preprocess(raw)
+
+    logger.info("4場モデルと10場モデルを比較中...")
+    results = venue_expansion_experiment.run(df)
+
+    paired = results["paired"]
+    logger.info(
+        f"--- 4場のテストレースでの比較（a={paired.attrs['label_a']}, "
+        f"b={paired.attrs['label_b']}） ---"
+    )
+    logger.info(paired.to_string())
+    logger.info("--- 10場モデルの開催場グループ別の指標 ---")
+    logger.info(results["reference"].to_string())
+
+    for path in venue_expansion_experiment.save_results(results):
+        logger.info(f"結果を保存しました: {path}")
+
+
 def compare_longshot_mode() -> None:
     """7番人気以下専用モデル（学習行を人気で絞る）とbaselineを比較し、結果をCSVに保存する。"""
     from predictor import longshot_experiment
@@ -740,6 +765,7 @@ def main() -> None:
             "[--min-child-samples N] [--feature-fraction F] "
             "| predict <race_id> | tune [--n-trials N] | compare-half-life "
             "| compare-longshot-training "
+            "| compare-venues "
             "| train-embeddings | similar-embeddings <category> <id> [--top-n N]"
         )
         sys.exit(1)
@@ -779,6 +805,8 @@ def main() -> None:
         compare_half_life_mode()
     elif command == "compare-longshot-training":
         compare_longshot_mode()
+    elif command == "compare-venues":
+        compare_venues_mode()
     elif command == "train-embeddings":
         train_embeddings_mode()
     elif command == "similar-embeddings":
