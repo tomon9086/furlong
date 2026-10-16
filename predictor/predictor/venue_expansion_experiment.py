@@ -30,7 +30,11 @@ from pathlib import Path
 import pandas as pd
 
 from predictor import calibration, evaluation, model
-from predictor.preprocessing import compute_recent_stats, split_by_date
+from predictor.preprocessing import (
+    compute_recent_stats,
+    split_by_date,
+    walk_forward_splits,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +131,81 @@ def run(
     reference = pd.DataFrame(reference_rows).set_index("開催場")
 
     return {"paired": paired, "reference": reference}
+
+
+def run_walk_forward(
+    df: pd.DataFrame,
+    n_splits: int = 5,
+    half_life_days: float | None = 1095.0,
+    n_bootstrap: int = 10_000,
+    random_state: int | None = 42,
+) -> dict[str, pd.DataFrame]:
+    """walk-forward（expanding window）で4場モデルと10場モデルを比較する。
+
+    ``train_mode`` の walk-forward と同じく、特徴量は全期間で計算してから
+    フォールドに分け、各フォールドのテスト期間で較正する（両モデルで同条件）。
+    フォールドの日付境界は10場データで決め、4場モデルにも同じ境界を使う。
+    全フォールドの4場のテストレースをプールしてペアードbootstrap検定する。
+
+    Returns
+    -------
+    dict[str, pd.DataFrame]
+        ``paired_wf``: プールしたテストレースでの検定結果（a=4場, b=10場）
+        ``folds_wf``: フォールド別の a・b の指標
+    """
+    logger.info("[walk-forward] 近走成績フィーチャーを計算中...")
+    featured_b = compute_recent_stats(df)
+    featured_a = compute_recent_stats(df[df["venue"].isin(ORIGINAL_VENUES)].copy())
+
+    test_a_frames, pred_a_frames, pred_b_frames, fold_rows = [], [], [], []
+    for fold_idx, (train_b, test_b) in enumerate(
+        walk_forward_splits(featured_b, n_splits=n_splits)
+    ):
+        train_end = test_b["date"].min()
+        test_end = test_b["date"].max()
+        train_a = featured_a[featured_a["date"] < train_end]
+        test_a = featured_a[
+            (featured_a["date"] >= train_end) & (featured_a["date"] <= test_end)
+        ]
+        logger.info(
+            f"[walk-forward] fold {fold_idx}: テスト {train_end.date()}〜"
+            f"{test_end.date()}"
+            f"（4場 学習{len(train_a):,}行 / 10場 学習{len(train_b):,}行）"
+        )
+
+        preds = {}
+        arms = (("4場", train_a, test_a), ("10場", train_b, test_b))
+        for label, train, test in arms:
+            models = model.train(train, half_life_days=half_life_days)
+            calibrated = calibration.calibrate_models(models, test)
+            preds[label] = model.predict(calibrated, test)
+
+        test_a_frames.append(test_a)
+        pred_a_frames.append(preds["4場"])
+        pred_b_frames.append(preds["10場"])
+        metrics_a = evaluation.evaluate(test_a, preds["4場"])
+        metrics_b = evaluation.evaluate(test_a, preds["10場"])
+        fold_rows.append(
+            {
+                "fold": fold_idx,
+                "test_start": train_end.date(),
+                "test_end": test_end.date(),
+                **{f"a_{k}": v for k, v in metrics_a.items()},
+                **{f"b_{k}": v for k, v in metrics_b.items()},
+            }
+        )
+
+    logger.info("[walk-forward] プールした4場のテストレースで検定中...")
+    paired = evaluation.paired_bootstrap_model_comparison(
+        pd.concat(test_a_frames, ignore_index=True),
+        pd.concat(pred_a_frames, ignore_index=True),
+        pd.concat(pred_b_frames, ignore_index=True),
+        n_bootstrap=n_bootstrap,
+        random_state=random_state,
+    )
+    paired.attrs["label_a"] = "4場で学習"
+    paired.attrs["label_b"] = "10場で学習"
+    return {"paired_wf": paired, "folds_wf": pd.DataFrame(fold_rows).set_index("fold")}
 
 
 def save_results(

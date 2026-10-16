@@ -575,6 +575,15 @@ def compare_venues_mode() -> None:
     logger.info("--- 10場モデルの開催場グループ別の指標 ---")
     logger.info(results["reference"].to_string())
 
+    logger.info("walk-forward で4場モデルと10場モデルを比較中...")
+    wf_results = venue_expansion_experiment.run_walk_forward(df)
+    paired_wf = wf_results["paired_wf"]
+    logger.info("--- walk-forward（5フォールドプール）・4場のテストレースでの比較 ---")
+    logger.info(paired_wf.to_string())
+    logger.info("--- walk-forward フォールド別（a=4場で学習, b=10場で学習） ---")
+    logger.info(wf_results["folds_wf"].to_string())
+    results.update(wf_results)
+
     for path in venue_expansion_experiment.save_results(results):
         logger.info(f"結果を保存しました: {path}")
 
