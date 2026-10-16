@@ -612,6 +612,40 @@ def trio_baseline_mode() -> None:
         logger.info(f"結果を保存しました: {path}")
 
 
+def trio_ev_mode() -> None:
+    """三連複の確定オッズ取得済みレースで EV ルールの回収率とエッジの有無を測る。"""
+    from functools import partial
+
+    import pandas as pd
+
+    from predictor import trio_ev_experiment
+    from predictor.preprocessing import (
+        JRA_VENUES,
+        load_data,
+        load_final_odds,
+        load_payoffs,
+        preprocess,
+    )
+
+    logger.info("データを読み込み中...")
+    raw = load_data(DATABASE_URL, venues=JRA_VENUES)
+    df = preprocess(raw)
+
+    results = trio_ev_experiment.run(
+        df,
+        partial(load_payoffs, DATABASE_URL),
+        partial(load_final_odds, DATABASE_URL, bet_type=7),
+    )
+    with pd.option_context("display.width", 220, "display.max_columns", 20):
+        logger.info("--- 三連複 EV ルールの回収率（確定オッズ・実配当） ---")
+        logger.info(results["recovery"].to_string())
+        logger.info("--- 対数尤度: モデル・市場+モデル vs 市場（三連複オッズ由来） ---")
+        logger.info(results["edge"].to_string())
+
+    for path in trio_ev_experiment.save_results(results):
+        logger.info(f"結果を保存しました: {path}")
+
+
 def compare_longshot_mode() -> None:
     """7番人気以下専用モデル（学習行を人気で絞る）とbaselineを比較し、結果をCSVに保存する。"""
     from predictor import longshot_experiment
@@ -799,7 +833,7 @@ def main() -> None:
             "| predict <race_id> | tune [--n-trials N] | compare-half-life "
             "| compare-longshot-training "
             "| compare-venues "
-            "| trio-baseline "
+            "| trio-baseline | trio-ev "
             "| train-embeddings | similar-embeddings <category> <id> [--top-n N]"
         )
         sys.exit(1)
@@ -843,6 +877,8 @@ def main() -> None:
         compare_venues_mode()
     elif command == "trio-baseline":
         trio_baseline_mode()
+    elif command == "trio-ev":
+        trio_ev_mode()
     elif command == "train-embeddings":
         train_embeddings_mode()
     elif command == "similar-embeddings":

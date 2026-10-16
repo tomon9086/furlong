@@ -324,6 +324,14 @@ FROM payoffs
 WHERE race_id = ANY(%s)
 """
 
+# 確定オッズ（scraper の odds_backfill が odds_snapshots から展開したもの）。
+# bet_type: 1=単勝 2=複勝 3=枠連 4=馬連 5=ワイド 6=馬単 7=三連複
+_FINAL_ODDS_QUERY = """
+SELECT race_id, combination, odds::float AS odds
+FROM final_odds
+WHERE race_id = ANY(%s) AND bet_type = %s
+"""
+
 _GLOBAL_PLACE_RATE_QUERY = """
 SELECT AVG(CASE WHEN rr.finishing_position::integer <= 3 THEN 1.0 ELSE 0.0 END) AS global_place_rate
 FROM race_results rr
@@ -429,6 +437,24 @@ def load_payoffs(database_url: str, race_ids: list[str]) -> pd.DataFrame:
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
             cur.execute(_PAYOFFS_QUERY, (race_ids,))
+            rows = cur.fetchall()
+            cols = [desc[0] for desc in cur.description]
+    return pd.DataFrame(rows, columns=cols)
+
+
+def load_final_odds(
+    database_url: str, race_ids: list[str], bet_type: int = 7
+) -> pd.DataFrame:
+    """指定レース・券種の確定オッズを DB から読み込む（既定は三連複）。
+
+    combination は馬番の0埋め2桁を昇順に連結した文字列（三連複 1-3-7 → '010307'）。
+    確定オッズを取得していないレースは結果に含まれない。
+    """
+    if not race_ids:
+        return pd.DataFrame(columns=["race_id", "combination", "odds"])
+    with psycopg.connect(database_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(_FINAL_ODDS_QUERY, (race_ids, bet_type))
             rows = cur.fetchall()
             cols = [desc[0] for desc in cur.description]
     return pd.DataFrame(rows, columns=cols)

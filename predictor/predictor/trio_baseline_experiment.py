@@ -161,6 +161,87 @@ def _bootstrap(
     return pd.DataFrame(rows)
 
 
+def build_methods(
+    df: pd.DataFrame,
+    half_life_days: float | None = 1095.0,
+    race_filter=None,
+) -> dict:
+    """モデルを学習し、テスト期間のレースごとに各方法の強さとディスカウントを作る。
+
+    標準 split（train/val/test）で学習・較正し、ディスカウント指数は較正期間で
+    推定する（テスト期間の結果を見ないため）。
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        ``preprocess()`` 済み・``compute_recent_stats()`` 未適用のデータ。
+    race_filter : Callable[[list[str]], set[str]] | None
+        指定した場合、テスト期間のレースをこの関数が返す race_id に絞る
+        （例: 三連複オッズを取得済みのレースだけを評価する）。
+
+    Returns
+    -------
+    dict
+        ``race_ids``・``frames``・``dates``（race_id -> 日付）・
+        ``methods``（方法名 -> (強さのリスト, lam2, lam3)）・``discount``。
+    """
+    featured = compute_recent_stats(df)
+    train_df, val_df, test_df = split_by_date(featured)
+    logger.info(
+        f"学習{len(train_df):,}行 / 較正{len(val_df):,}行 / テスト{len(test_df):,}行"
+    )
+    models = model.train(train_df, half_life_days=half_life_days)
+    calibrated = calibration.calibrate_models(models, val_df)
+    pred_val = model.predict(calibrated, val_df)
+    pred_test = model.predict(calibrated, test_df)
+
+    val_ids, val_frames = _valid_races(val_df, pred_val)
+    val_top3 = _top3_idx(val_frames)
+    lam_win = trio.fit_discount(_strengths(val_frames, "win"), val_top3)
+    lam_market = trio.fit_discount(_strengths(val_frames, "market"), val_top3)
+    logger.info(
+        f"着順別ディスカウント（較正期間 {len(val_ids):,}レースで推定）: "
+        f"win_prob lam2={lam_win[0]:.3f} lam3={lam_win[1]:.3f} / "
+        f"市場 lam2={lam_market[0]:.3f} lam3={lam_market[1]:.3f}"
+    )
+
+    race_ids, frames = _valid_races(test_df, pred_test)
+    if race_filter is not None:
+        allowed = race_filter(race_ids)
+        keep = [i for i, rid in enumerate(race_ids) if rid in allowed]
+        race_ids = [race_ids[i] for i in keep]
+        frames = [frames[i] for i in keep]
+    logger.info(f"評価対象: テスト期間 {len(race_ids):,}レース")
+
+    win_s = _strengths(frames, "win")
+    market_s = _strengths(frames, "market")
+    logger.info("案B: 3着内確率を place_prob に合わせた強さを計算中...")
+    place_s = [
+        trio.strengths_matching_marginals(g["place_prob"].to_numpy(), init=s)
+        for g, s in zip(frames, win_s, strict=True)
+    ]
+    dates = test_df.drop_duplicates("race_id").set_index("race_id")["date"]
+
+    return {
+        "race_ids": race_ids,
+        "frames": frames,
+        "dates": dates,
+        "methods": {
+            "現行": (win_s, 1.0, 1.0),
+            "案A": (win_s, *lam_win),
+            "案B": (place_s, 1.0, 1.0),
+            "市場": (market_s, 1.0, 1.0),
+            "市場+補正": (market_s, *lam_market),
+        },
+        "discount": pd.DataFrame(
+            [
+                {"source": "win_prob", "lam2": lam_win[0], "lam3": lam_win[1]},
+                {"source": "市場", "lam2": lam_market[0], "lam3": lam_market[1]},
+            ]
+        ),
+    }
+
+
 def run(
     df: pd.DataFrame,
     payoffs_loader,
@@ -178,61 +259,19 @@ def run(
         race_id のリストから払戻データを読み込む関数
         （``load_payoffs`` に DB の URL を部分適用したもの）。
     """
-    featured = compute_recent_stats(df)
-    train_df, val_df, test_df = split_by_date(featured)
-    logger.info(
-        f"学習{len(train_df):,}行 / 較正{len(val_df):,}行 / テスト{len(test_df):,}行"
-    )
-    models = model.train(train_df, half_life_days=half_life_days)
-    calibrated = calibration.calibrate_models(models, val_df)
-    pred_val = model.predict(calibrated, val_df)
-    pred_test = model.predict(calibrated, test_df)
-
-    # ディスカウント指数は較正期間で推定する（テスト期間の結果を見ないため）
-    val_ids, val_frames = _valid_races(val_df, pred_val)
-    val_top3 = _top3_idx(val_frames)
-    lam_win = trio.fit_discount(_strengths(val_frames, "win"), val_top3)
-    lam_market = trio.fit_discount(_strengths(val_frames, "market"), val_top3)
-    logger.info(
-        f"着順別ディスカウント（較正期間 {len(val_ids):,}レースで推定）: "
-        f"win_prob lam2={lam_win[0]:.3f} lam3={lam_win[1]:.3f} / "
-        f"市場 lam2={lam_market[0]:.3f} lam3={lam_market[1]:.3f}"
-    )
-
-    race_ids, frames = _valid_races(test_df, pred_test)
-    logger.info(f"評価対象: テスト期間 {len(race_ids):,}レース")
+    built = build_methods(df, half_life_days)
+    race_ids, frames = built["race_ids"], built["frames"]
     payoff_map = _trio_payoff_map(payoffs_loader(race_ids))
 
-    win_s = _strengths(frames, "win")
-    market_s = _strengths(frames, "market")
-    logger.info("案B: 3着内確率を place_prob に合わせた強さを計算中...")
-    place_s = [
-        trio.strengths_matching_marginals(g["place_prob"].to_numpy(), init=s)
-        for g, s in zip(frames, win_s, strict=True)
-    ]
-
-    methods = {
-        "現行": (win_s, 1.0, 1.0),
-        "案A": (win_s, *lam_win),
-        "案B": (place_s, 1.0, 1.0),
-        "市場": (market_s, 1.0, 1.0),
-        "市場+補正": (market_s, *lam_market),
-    }
     stats = {}
-    for name, (strengths, lam2, lam3) in methods.items():
+    for name, (strengths, lam2, lam3) in built["methods"].items():
         logger.info(f"評価中: {name}")
         stats[name] = _evaluate_method(
             race_ids, frames, strengths, lam2, lam3, payoff_map
         )
 
     summary = _bootstrap(stats, n_bootstrap, random_state)
-    params = pd.DataFrame(
-        [
-            {"source": "win_prob", "lam2": lam_win[0], "lam3": lam_win[1]},
-            {"source": "市場", "lam2": lam_market[0], "lam3": lam_market[1]},
-        ]
-    )
-    return {"summary": summary, "discount": params}
+    return {"summary": summary, "discount": built["discount"]}
 
 
 def save_results(
