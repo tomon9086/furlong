@@ -419,7 +419,9 @@ def _toml_list(values: list) -> str:
 
 
 def _format_betting_toml(
-    pred_df: pd.DataFrame, market_discount: tuple[float, float] | None = None
+    pred_df: pd.DataFrame,
+    market_discount: tuple[float, float] | None = None,
+    model_version: str | None = None,
 ) -> str:
     """予測結果と推奨買い目を TOML 文字列として生成する。
 
@@ -428,7 +430,11 @@ def _format_betting_toml(
     """
     df = pred_df  # already _mark_recommended されていることを前提とする
 
-    lines: list[str] = [f"ev_threshold = {_EV_THRESHOLD}\n"]
+    lines: list[str] = []
+    if model_version is not None:
+        # 予測に使ったモデルディレクトリ名（predictor/models/<model_version>）
+        lines.append(f'model_version = "{model_version}"')
+    lines.append(f"ev_threshold = {_EV_THRESHOLD}\n")
 
     for race_id, group in df.groupby("race_id"):
         group = group.sort_values("predicted_rank")
@@ -543,6 +549,7 @@ def save_output(
     race_number: str | None = None,
     date: str | None = None,
     market_discount: tuple[float, float] | None = None,
+    model_version: str | None = None,
 ) -> None:
     """予測結果を CSV + 買い目 TOML としてディレクトリ配下に保存する。
 
@@ -566,5 +573,7 @@ def save_output(
     logger.info(f"CSV 保存: {csv_path}")
 
     toml_path = run_dir / "betting.toml"
-    toml_path.write_text(_format_betting_toml(df, market_discount), encoding="utf-8")
+    toml_path.write_text(
+        _format_betting_toml(df, market_discount, model_version), encoding="utf-8"
+    )
     logger.info(f"TOML 保存: {toml_path}")

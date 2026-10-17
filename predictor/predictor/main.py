@@ -509,16 +509,25 @@ def predict_mode(race_id: str) -> None:
         logger.error(f"レース {race_id} の予測対象行が見つかりません")
         sys.exit(1)
 
-    try:
-        models = model.load_calibrated_models()
-    except FileNotFoundError:
+    # 予測に使うモデルディレクトリを1つに決め、すべてそこから読む
+    version_dir = model.find_calibrated_model_dir()
+    calibrated = version_dir is not None
+    if calibrated:
+        models = model.load_calibrated_models_from(version_dir)
+    else:
+        version_dir = model.latest_model_dir()
         models = model.load_models()
     pred_df = model.predict(models, target)
 
     # オッズなし・オッズありの2パターン（PL 勝ちモデルを含むモデルで学習済みの場合）
     from predictor import dual_prediction
 
-    dual = dual_prediction.load_dual_models(model.latest_model_dir())
+    dual = dual_prediction.load_dual_models(version_dir)
+    logger.info(
+        f"使用モデル: {version_dir.name}（{version_dir}）"
+        f" / 較正済み: {'あり' if calibrated else 'なし'}"
+        f" / オッズなし・ありの2パターン: {'あり' if dual is not None else 'なし'}"
+    )
     if dual is not None:
         pred_df = dual_prediction.add_dual_probabilities(pred_df, target, *dual)
         if pred_df["win_prob_odds"].isna().all():
@@ -540,6 +549,7 @@ def predict_mode(race_id: str) -> None:
         race_number=_race_number,
         date=_race_date,
         market_discount=market_discount,
+        model_version=version_dir.name,
     )
 
 

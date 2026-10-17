@@ -149,3 +149,27 @@ class TestSaveLoadPlBooster:
 
     def test_missing_files_return_none(self, tmp_path):
         assert dual_prediction.load_dual_models(tmp_path) is None
+
+
+class TestModelVersion:
+    def test_model_version_written_to_toml(self):
+        target = _race_frame().iloc[:5]
+        pred = target[["race_id", "horse_number", "win_odds"]].assign(
+            win_prob=[0.4, 0.3, 0.15, 0.1, 0.05], place_prob=0.5, predicted_rank=1
+        )
+        df = output._mark_recommended(pred)
+        parsed = tomllib.loads(
+            output._format_betting_toml(df, model_version="20261017_152611")
+        )
+        assert parsed["model_version"] == "20261017_152611"
+
+    def test_find_calibrated_model_dir_skips_dirs_without_calibration(self, tmp_path):
+        from predictor import model
+
+        (tmp_path / "20261017_100000").mkdir()
+        for name in ("win_calibrated.pkl", "place_calibrated.pkl"):
+            (tmp_path / "20261017_100000" / name).write_bytes(b"")
+        # より新しいが較正済みファイルの無いディレクトリは選ばない
+        (tmp_path / "20261017_120000").mkdir()
+        assert model.find_calibrated_model_dir(tmp_path).name == "20261017_100000"
+        assert model.latest_model_dir(tmp_path).name == "20261017_120000"

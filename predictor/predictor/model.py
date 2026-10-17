@@ -241,31 +241,39 @@ def load_models(model_dir: Path = _MODEL_DIR) -> Models:
     return Models(win=win, place=place)
 
 
+def find_calibrated_model_dir(model_dir: Path = _MODEL_DIR) -> Path | None:
+    """較正済みファイルが存在する最新のモデルディレクトリを返す（無ければ None）。"""
+    dirs = sorted(d for d in model_dir.iterdir() if d.is_dir())
+    for version_dir in reversed(dirs):
+        if (version_dir / "win_calibrated.pkl").exists() and (
+            version_dir / "place_calibrated.pkl"
+        ).exists():
+            return version_dir
+    return None
+
+
+def load_calibrated_models_from(version_dir: Path) -> CalibratedModels:
+    """指定したモデルディレクトリから較正済みモデルを読み込む。"""
+    loaded = {}
+    for key, filename in (
+        ("win", "win_calibrated.pkl"),
+        ("place", "place_calibrated.pkl"),
+        ("raw_win", "win_model.pkl"),
+        ("raw_place", "place_model.pkl"),
+    ):
+        with open(version_dir / filename, "rb") as f:
+            loaded[key] = pickle.load(f)
+    return CalibratedModels(**loaded)
+
+
 def load_calibrated_models(model_dir: Path = _MODEL_DIR) -> CalibratedModels:
     """保存済み較正済みモデルを読み込む（較正済みファイルが存在する最新ディレクトリを使用）。"""
-    dirs = sorted(d for d in model_dir.iterdir() if d.is_dir())
-    if not dirs:
+    if not any(d.is_dir() for d in model_dir.iterdir()):
         raise FileNotFoundError(f"モデルが見つかりません: {model_dir}")
-
-    for version_dir in reversed(dirs):
-        win_path = version_dir / "win_calibrated.pkl"
-        place_path = version_dir / "place_calibrated.pkl"
-        win_raw_path = version_dir / "win_model.pkl"
-        place_raw_path = version_dir / "place_model.pkl"
-        if win_path.exists() and place_path.exists():
-            with open(win_path, "rb") as f:
-                win = pickle.load(f)
-            with open(place_path, "rb") as f:
-                place = pickle.load(f)
-            with open(win_raw_path, "rb") as f:
-                raw_win = pickle.load(f)
-            with open(place_raw_path, "rb") as f:
-                raw_place = pickle.load(f)
-            return CalibratedModels(
-                win=win, place=place, raw_win=raw_win, raw_place=raw_place
-            )
-
-    raise FileNotFoundError(f"較正済みモデルが見つかりません: {model_dir}")
+    version_dir = find_calibrated_model_dir(model_dir)
+    if version_dir is None:
+        raise FileNotFoundError(f"較正済みモデルが見つかりません: {model_dir}")
+    return load_calibrated_models_from(version_dir)
 
 
 def predict(models: Models | CalibratedModels, df: pd.DataFrame) -> pd.DataFrame:
