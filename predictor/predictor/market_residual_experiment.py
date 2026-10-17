@@ -34,13 +34,13 @@ from predictor.preprocessing import (
     compute_recent_stats,
     compute_time_decay_weight,
     split_by_date,
+    walk_forward_splits,
 )
 from predictor.sharpness_experiment import _race_groups, _trio_and_place, _win_nll
 
 logger = logging.getLogger(__name__)
 
 _OUTPUT_DIR = Path(__file__).parent.parent.parent / "output"
-METHODS = ["V0", "P1", "P3", "M3", "市場"]
 
 
 def _complete_races(df: pd.DataFrame) -> pd.DataFrame:
@@ -94,20 +94,22 @@ def _paired(
     return pd.DataFrame(rows)
 
 
-def run(
-    df: pd.DataFrame,
-    half_life_days: float | None = 1095.0,
-    n_bootstrap: int = 2000,
-    random_state: int | None = 42,
-) -> dict[str, pd.DataFrame]:
-    """標準 split で V0・P1・P3・M3・市場を比較する。"""
-    featured = _complete_races(compute_recent_stats(df))
-    train_df, val_df, test_df = split_by_date(featured)
-    logger.info(
-        f"学習 {train_df['race_id'].nunique():,} / "
-        f"較正 {val_df['race_id'].nunique():,} / "
-        f"テスト {test_df['race_id'].nunique():,} レース（全馬オッズあり・同着なし）"
-    )
+# (名前, 上位何頭まで学習するか, オッズ起点か)
+STANDARD_VARIANTS = (("P1", 1, False), ("P3", 3, False), ("M3", 3, True))
+WALK_FORWARD_VARIANTS = (("P3", 3, False), ("M1", 1, True), ("M3", 3, True))
+
+
+def _fit_and_predict(
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    variants: tuple,
+    half_life_days: float | None,
+) -> tuple[pd.DataFrame, dict[str, int]]:
+    """V0 と各 PL モデルを学習し、テスト期間の各方法の勝率を並べた DataFrame を返す。
+
+    val_df は V0 の isotonic 較正と PL の早期終了にだけ使う（テスト期間には触れない）。
+    """
     weight = (
         compute_time_decay_weight(
             train_df["date"], train_df["date"].max(), half_life_days
@@ -115,7 +117,6 @@ def run(
         if half_life_days is not None
         else None
     )
-
     keep_cols = ["race_id", "horse_number", "finishing_position", "popularity"]
     test = test_df[keep_cols + ["is_win", "is_placed"]].copy()
 
@@ -132,7 +133,6 @@ def run(
     init_test = _market_log_prob(test_df)
 
     rounds = {}
-    variants = (("P1", 1, False), ("P3", 3, False), ("M3", 3, True))
     for name, top_k, use_market in variants:
         logger.info(f"{name} を学習中...（top_k={top_k}, オッズ起点={use_market}）")
         booster = pl_model.train_pl(
@@ -157,12 +157,22 @@ def run(
         test_df[["race_id", "horse_number"]].assign(市場=np.exp(init_test)),
         on=["race_id", "horse_number"],
     )
+    return test, rounds
+
+
+def _evaluate(
+    test: pd.DataFrame,
+    methods: list[str],
+    n_bootstrap: int,
+    random_state: int | None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """各方法の対数尤度（V0・市場を基準にペアード bootstrap）と人気帯別のずれ。"""
     test = test.sort_values(["race_id", "horse_number"]).reset_index(drop=True)
     groups = _race_groups(test)
     is_win = test["is_win"].to_numpy()
 
     per_race: dict[str, dict[str, np.ndarray]] = {}
-    for m in METHODS:
+    for m in methods:
         logger.info(f"評価中: {m}")
         trio_nll, place_nll, marg = _trio_and_place(test, m, groups)
         test[f"{m}_top3"] = marg
@@ -180,14 +190,35 @@ def run(
         ],
         ignore_index=True,
     )
-
     prob_cols = {}
-    for m in METHODS:
+    for m in methods:
         prob_cols[f"勝率 {m}"] = m
         prob_cols[f"3着内 {m}"] = f"{m}_top3"
     by_popularity = evaluation.calibration_by_popularity(
         test, prob_cols, n_bootstrap=500, random_state=random_state
     )
+    return summary, by_popularity
+
+
+def run(
+    df: pd.DataFrame,
+    half_life_days: float | None = 1095.0,
+    n_bootstrap: int = 2000,
+    random_state: int | None = 42,
+) -> dict[str, pd.DataFrame]:
+    """標準 split で V0・P1・P3・M3・市場を比較する。"""
+    featured = _complete_races(compute_recent_stats(df))
+    train_df, val_df, test_df = split_by_date(featured)
+    logger.info(
+        f"学習 {train_df['race_id'].nunique():,} / "
+        f"較正 {val_df['race_id'].nunique():,} / "
+        f"テスト {test_df['race_id'].nunique():,} レース（全馬オッズあり・同着なし）"
+    )
+    test, rounds = _fit_and_predict(
+        train_df, val_df, test_df, STANDARD_VARIANTS, half_life_days
+    )
+    methods = ["V0", *[v[0] for v in STANDARD_VARIANTS], "市場"]
+    summary, by_popularity = _evaluate(test, methods, n_bootstrap, random_state)
 
     # M3 が市場からどれだけ離れたか（勝率の log 比の絶対値の平均）
     shift = float(np.abs(np.log(test["M3"] / test["市場"])).mean())
@@ -196,6 +227,59 @@ def run(
         + [{"method": "M3 の市場からの平均 |log(p/q)|", "best_iteration": shift}]
     )
     return {"summary": summary, "by_popularity": by_popularity, "info": info}
+
+
+def run_walk_forward(
+    df: pd.DataFrame,
+    n_splits: int = 5,
+    inner_val_ratio: float = 0.1,
+    half_life_days: float | None = 1095.0,
+    n_bootstrap: int = 2000,
+    random_state: int | None = 42,
+) -> dict[str, pd.DataFrame]:
+    """walk-forward（expanding window）で V0・P3・M1・M3・市場を比較する。
+
+    各フォールドの学習期間のうち、最後の ``inner_val_ratio`` の日付を較正・早期終了用に
+    取り分け、テスト期間には一切触れない。全フォールドのテストレースをプールして検定する。
+    """
+    featured = _complete_races(compute_recent_stats(df))
+    frames, fold_rows = [], []
+    for fold_idx, (fold_train, fold_test) in enumerate(
+        walk_forward_splits(featured, n_splits=n_splits)
+    ):
+        dates = fold_train["date"].sort_values().unique()
+        val_start = dates[int(len(dates) * (1 - inner_val_ratio))]
+        train_df = fold_train[fold_train["date"] < val_start]
+        val_df = fold_train[fold_train["date"] >= val_start]
+        logger.info(
+            f"[walk-forward] fold {fold_idx}: "
+            f"テスト {fold_test['date'].min().date()}〜{fold_test['date'].max().date()}"
+            f"（学習 {train_df['race_id'].nunique():,} / "
+            f"較正 {val_df['race_id'].nunique():,} / "
+            f"テスト {fold_test['race_id'].nunique():,} レース）"
+        )
+        test, rounds = _fit_and_predict(
+            train_df, val_df, fold_test, WALK_FORWARD_VARIANTS, half_life_days
+        )
+        frames.append(test)
+        fold_rows.append(
+            {
+                "fold": fold_idx,
+                "test_start": fold_test["date"].min().date(),
+                "test_end": fold_test["date"].max().date(),
+                **{f"rounds_{k}": v for k, v in rounds.items()},
+            }
+        )
+
+    methods = ["V0", *[v[0] for v in WALK_FORWARD_VARIANTS], "市場"]
+    summary, by_popularity = _evaluate(
+        pd.concat(frames, ignore_index=True), methods, n_bootstrap, random_state
+    )
+    return {
+        "summary_wf": summary,
+        "by_popularity_wf": by_popularity,
+        "folds_wf": pd.DataFrame(fold_rows),
+    }
 
 
 def save_results(

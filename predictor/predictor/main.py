@@ -750,6 +750,16 @@ def compare_market_residual_mode() -> None:
 
     logger.info("データを読み込み中...")
     df = preprocess(load_data(DATABASE_URL, venues=JRA_VENUES))
+    if "--walkforward" in sys.argv:
+        results = market_residual_experiment.run_walk_forward(df)
+        with pd.option_context("display.width", 220, "display.max_columns", 30):
+            logger.info("--- walk-forward（5フォールドプール） ---")
+            logger.info(results["folds_wf"].to_string())
+            logger.info(results["summary_wf"].to_string())
+            logger.info(results["by_popularity_wf"].to_string())
+        for path in market_residual_experiment.save_results(results):
+            logger.info(f"結果を保存しました: {path}")
+        return
     results = market_residual_experiment.run(df)
     with pd.option_context("display.width", 220, "display.max_columns", 20):
         logger.info("--- 学習の情報 ---")
@@ -950,7 +960,7 @@ def main() -> None:
             "| compare-longshot-training "
             "| compare-venues "
             "| trio-baseline | trio-ev | calibration-by-popularity "
-            "| compare-sharpness | compare-market-residual "
+            "| compare-sharpness | compare-market-residual [--walkforward] "
             "| train-embeddings | similar-embeddings <category> <id> [--top-n N]"
         )
         sys.exit(1)
