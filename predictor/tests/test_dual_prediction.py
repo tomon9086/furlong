@@ -173,3 +173,25 @@ class TestModelVersion:
         (tmp_path / "20261017_120000").mkdir()
         assert model.find_calibrated_model_dir(tmp_path).name == "20261017_100000"
         assert model.latest_model_dir(tmp_path).name == "20261017_120000"
+
+
+class TestDualTable:
+    def test_percent_and_market_rank(self):
+        target = _race_frame().iloc[:5]
+        pred = target[["race_id", "horse_number", "win_odds"]].assign(
+            win_prob=0.2, place_prob=0.5, predicted_rank=1, horse_name="テスト"
+        )
+        out = dual_prediction.add_dual_probabilities(
+            pred, target, _booster(), (0.8, 0.8)
+        )
+        text = output._format_dual_table(out.sort_values("predicted_rank"))
+        lines = text.splitlines()
+        assert "勝率[モデル]" in lines[0] and "3着内[市場]" in lines[0]
+        assert "%" in lines[1]
+        # 馬番1（単勝2.0倍）は1番人気
+        row = next(line for line in lines[1:] if line.split()[0] == "1")
+        assert row.split()[3] == "1"
+
+    def test_display_width_counts_fullwidth_as_two(self):
+        assert output._display_width("エンネ") == 6
+        assert output._display_width("ab") == 2

@@ -541,7 +541,18 @@ def predict_mode(race_id: str) -> None:
         )
 
     market_discount = dual[1] if dual is not None else None
-    output.print_prediction(pred_df, market_discount=market_discount)
+    race_label = " ".join(
+        part
+        for part in (
+            _race_date,
+            f"{_race_number}R" if _race_number else None,
+            _race_name,
+        )
+        if part and part not in ("None", "nan")
+    )
+    output.print_prediction(
+        pred_df, market_discount=market_discount, race_label=race_label
+    )
     output.save_output(
         pred_df,
         race_id,

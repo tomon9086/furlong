@@ -289,13 +289,67 @@ def _trio_candidates(
     return result
 
 
+def _display_width(text: str) -> int:
+    """全角文字を幅2として数えた表示幅。"""
+    import unicodedata
+
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
+
+
+def _ljust_display(text: str, width: int) -> str:
+    """表示幅 width になるよう右側を空白で埋める。"""
+    return text + " " * max(width - _display_width(text), 0)
+
+
+def _format_dual_table(group: pd.DataFrame) -> str:
+    """オッズなし（モデル）・オッズあり（市場）の確率を見比べやすい表にする。
+
+    確率はパーセント表示、モデル順に並べる。複勝モデルの確率などの細かい列は
+    CSV にだけ残し、画面には出さない。
+    """
+    odds_col = "win_odds" if "win_odds" in group.columns else "odds"
+    odds = pd.to_numeric(group.get(odds_col), errors="coerce")
+
+    def pct(values: pd.Series) -> list[str]:
+        return ["-" if pd.isna(v) else f"{v:.1%}" for v in values]
+
+    table = pd.DataFrame(
+        {
+            "馬番": group["horse_number"].astype(str).to_numpy(),
+            "馬名": group["horse_name"].fillna("").astype(str).to_numpy()
+            if "horse_name" in group.columns
+            else "",
+            "単勝": ["-" if pd.isna(v) else f"{v:.1f}" for v in odds],
+            "人気": [
+                "-" if pd.isna(v) else str(int(v))
+                for v in odds.rank(method="min")
+            ],
+            "勝率[モデル]": pct(group["win_prob"]),
+            "3着内[モデル]": pct(group["top3_prob"]),
+            "勝率[市場]": pct(group["win_prob_odds"]),
+            "3着内[市場]": pct(group["top3_prob_odds"]),
+        }
+    )
+    if "ev" in group.columns:
+        table["EV"] = ["-" if pd.isna(v) else f"{v:.2f}" for v in group["ev"]]
+    # 馬名は左寄せにする（pandas は文字列を右寄せにするため、表示幅で埋めておく）
+    width = max([_display_width(n) for n in table["馬名"]] + [4])
+    table["馬名"] = [_ljust_display(n, width) for n in table["馬名"]]
+    with pd.option_context(
+        "display.unicode.east_asian_width", True, "display.width", 200
+    ):
+        return table.to_string(index=False)
+
+
 def print_prediction(
-    pred_df: pd.DataFrame, market_discount: tuple[float, float] | None = None
+    pred_df: pd.DataFrame,
+    market_discount: tuple[float, float] | None = None,
+    race_label: str | None = None,
 ) -> None:
     """予測結果を標準出力に表示する。
 
     ``market_discount`` を渡すと、オッズなし・オッズありの2パターンの
-    三連複上位組も表示する。
+    三連複上位組も表示する。``race_label`` は見出しに添えるレース名など。
     """
     df = _mark_recommended(pred_df)
     display_cols = [
@@ -313,9 +367,17 @@ def print_prediction(
 
     for race_id, group in df.groupby("race_id"):
         group = group.sort_values("predicted_rank")
-        show_cols = [c for c in display_cols if c in group.columns]
-        logger.info(f"\n=== レース {race_id} ===")
-        logger.info(group[show_cols].to_string(index=False))
+        label = f" {race_label}" if race_label else ""
+        logger.info(f"\n=== レース {race_id}{label} ===")
+        if all(c in group.columns for c in _DUAL_COLS):
+            logger.info(
+                "  [モデル] = オッズなし（特徴量だけの見立て）、"
+                "[市場] = オッズあり（発走前の単勝オッズ＋2・3着の補正）"
+            )
+            logger.info("\n" + _format_dual_table(group))
+        else:
+            show_cols = [c for c in display_cols if c in group.columns]
+            logger.info(group[show_cols].to_string(index=False))
 
         win_horses = group[group["recommended_win"]]
         place_horses = group[group["recommended_place"]]
@@ -329,15 +391,16 @@ def print_prediction(
 
         candidates = _trio_candidates(group, market_discount)
         if candidates:
-            logger.info("\n  三連複の確率上位（オッズなし / オッズあり）:")
+            logger.info("\n  三連複の確率上位:")
+            labels = {"オッズなし": "[モデル]", "オッズあり": "[市場]"}
             for label, combos in candidates.items():
+                logger.info(f"    {labels.get(label, label)}")
                 if not combos:
-                    logger.info(f"    {label}: (オッズが無いため計算できません)")
+                    logger.info("      (オッズが無いため計算できません)")
                     continue
-                text = "  ".join(
-                    f"{'-'.join(str(h) for h in hn)} ({p:.1%})" for hn, p in combos
-                )
-                logger.info(f"    {label}: {text}")
+                for rank, (hn, p) in enumerate(combos, start=1):
+                    combo = "-".join(f"{h:>2}" for h in hn)
+                    logger.info(f"      {rank}. {combo}  {p:5.1%}")
 
         logger.info("\n  推奨買い目:")
         if win_horses.empty:
