@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pickle
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import NamedTuple
 
@@ -15,6 +16,7 @@ from predictor.calibration import CalibratedModels
 from predictor.preprocessing import compute_time_decay_weight, get_feature_columns
 
 _MODEL_DIR = Path(__file__).parent.parent / "models"
+_JST = ZoneInfo("Asia/Tokyo")
 
 # 複勝モデル用パラメータ（binary classification）
 # num_leaves/learning_rate/min_child_samples/feature_fraction は Optuna チューニング
@@ -192,7 +194,9 @@ def save_models(
     model_dir: Path = _MODEL_DIR,
 ) -> Path:
     """モデルをタイムスタンプ付きディレクトリに保存する。"""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # 最新モデルはディレクトリ名の辞書順で選ぶので、学習したマシンのタイムゾーン
+    # （golem は UTC、ローカルは JST）に関係なく日本時間で名前を付ける
+    timestamp = datetime.now(_JST).strftime("%Y%m%d_%H%M%S")
     version_dir = model_dir / timestamp
     version_dir.mkdir(parents=True, exist_ok=True)
 
