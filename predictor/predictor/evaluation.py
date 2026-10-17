@@ -1896,3 +1896,100 @@ def paired_bootstrap_model_comparison(
             }
         )
     return pd.DataFrame(rows)
+
+
+# 人気薄の較正を細かく見るための人気帯（``_pop_tier`` より細かい）
+_FINE_POP_TIERS: list[tuple[str, int, int]] = [
+    ("1番人気", 1, 1),
+    ("2-3番人気", 2, 3),
+    ("4-6番人気", 4, 6),
+    ("7-9番人気", 7, 9),
+    ("10-12番人気", 10, 12),
+    ("13番人気以下", 13, 99),
+]
+
+
+def calibration_by_popularity(
+    df: pd.DataFrame,
+    prob_cols: dict[str, str],
+    n_bootstrap: int = 10_000,
+    ci: float = 0.95,
+    random_state: int | None = None,
+) -> pd.DataFrame:
+    """人気帯ごとに、予測確率の平均と実際の割合のずれをレース単位 bootstrap で検定する。
+
+    人気（popularity）は評価の切り口にだけ使う（特徴量には入れない）。
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        1行1頭。race_id, popularity, is_win, is_placed と、``prob_cols`` の列を含む。
+    prob_cols : dict[str, str]
+        {表示名: 確率の列名}。表示名が "勝率" で始まるものは is_win と、
+        "3着内" で始まるものは is_placed と比べる。
+    n_bootstrap : int
+        ブートストラップ試行回数。
+
+    Returns
+    -------
+    pd.DataFrame
+        確率の種類 × 人気帯ごとに、頭数・予測の平均・実際の割合・
+        ずれ（予測 − 実際）とその CI・比（実際 / 予測）・有意フラグ。
+        ずれが正なら確率を高く見すぎ（過大評価）、負なら低く見すぎ（過小評価）。
+    """
+    data = df.copy()
+    data["popularity"] = pd.to_numeric(data["popularity"], errors="coerce")
+    data = data.dropna(subset=["popularity"])
+    race_codes, race_index = pd.factorize(data["race_id"])
+    n_races = len(race_index)
+    tier_idx = np.full(len(data), -1)
+    for t, (_, lo, hi) in enumerate(_FINE_POP_TIERS):
+        in_tier = (data["popularity"] >= lo) & (data["popularity"] <= hi)
+        tier_idx[in_tier.to_numpy()] = t
+    keep = tier_idx >= 0
+    n_tiers = len(_FINE_POP_TIERS)
+
+    def _per_race(values: np.ndarray) -> np.ndarray:
+        out = np.zeros((n_races, n_tiers))
+        np.add.at(out, (race_codes[keep], tier_idx[keep]), values[keep])
+        return out
+
+    counts = _per_race(np.ones(len(data)))
+    rng = np.random.default_rng(random_state)
+    samples = [rng.integers(0, n_races, size=n_races) for _ in range(n_bootstrap)]
+    alpha = 1.0 - ci
+
+    rows = []
+    for label, col in prob_cols.items():
+        actual_col = "is_win" if label.startswith("勝率") else "is_placed"
+        pred = _per_race(data[col].to_numpy(dtype=float))
+        actual = _per_race(data[actual_col].to_numpy(dtype=float))
+        boot = np.empty((n_bootstrap, n_tiers))
+        for i, idx in enumerate(samples):
+            c = counts[idx].sum(axis=0)
+            diff = pred[idx].sum(axis=0) - actual[idx].sum(axis=0)
+            boot[i] = diff / np.maximum(c, 1)
+        total = counts.sum(axis=0)
+        mean_pred = pred.sum(axis=0) / np.maximum(total, 1)
+        actual_rate = actual.sum(axis=0) / np.maximum(total, 1)
+        for t, (tier, _, _) in enumerate(_FINE_POP_TIERS):
+            lo, hi = np.percentile(
+                boot[:, t], [100 * alpha / 2, 100 * (1 - alpha / 2)]
+            )
+            rows.append(
+                {
+                    "prob": label,
+                    "tier": tier,
+                    "horses": int(total[t]),
+                    "mean_pred": float(mean_pred[t]),
+                    "actual_rate": float(actual_rate[t]),
+                    "bias": float(mean_pred[t] - actual_rate[t]),
+                    "bias_ci_lower": float(lo),
+                    "bias_ci_upper": float(hi),
+                    "actual_over_pred": float(actual_rate[t] / mean_pred[t])
+                    if mean_pred[t] > 0
+                    else float("nan"),
+                    "significant": not (lo <= 0 <= hi),
+                }
+            )
+    return pd.DataFrame(rows)

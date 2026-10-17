@@ -64,3 +64,36 @@ class TestFitDiscount:
         lam2, lam3 = trio.fit_discount(strengths, np.array(top3))
         # 三連複は順不同なので lam2 と lam3 は個別には識別しにくい。平均で確認する
         assert (lam2 + lam3) / 2 == pytest.approx((true_lam2 + true_lam3) / 2, abs=0.1)
+
+
+class TestCalibrationByPopularity:
+    def test_detects_overestimated_longshots(self):
+        """人気薄の確率を一律に高く見積もると、その人気帯の bias が正で有意になる。"""
+        import pandas as pd
+
+        from predictor import evaluation
+
+        rng = np.random.default_rng(0)
+        rows = []
+        for r in range(400):
+            true_p = rng.dirichlet(np.full(14, 0.8))
+            order = np.argsort(-true_p)
+            winner = rng.choice(14, p=true_p)
+            for rank, h in enumerate(order, start=1):
+                pred = true_p[h] * (2.0 if rank >= 10 else 1.0)
+                rows.append(
+                    {
+                        "race_id": f"R{r}",
+                        "popularity": rank,
+                        "is_win": int(h == winner),
+                        "is_placed": 0,
+                        "pred": pred,
+                    }
+                )
+        df = pd.DataFrame(rows)
+        result = evaluation.calibration_by_popularity(
+            df, {"勝率": "pred"}, n_bootstrap=300, random_state=0
+        ).set_index("tier")
+        assert result.loc["13番人気以下", "bias"] > 0
+        assert result.loc["10-12番人気", "bias"] > 0
+        assert not result.loc["1番人気", "significant"]

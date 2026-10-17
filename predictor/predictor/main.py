@@ -646,6 +646,80 @@ def trio_ev_mode() -> None:
         logger.info(f"結果を保存しました: {path}")
 
 
+def calibration_by_popularity_mode() -> None:
+    """人気帯ごとの確率のずれ（較正）を検定し、結果を CSV に保存する。"""
+    from datetime import datetime
+    from pathlib import Path
+
+    import numpy as np
+    import pandas as pd
+
+    from predictor import calibration, evaluation, model, trio
+    from predictor.preprocessing import (
+        JRA_VENUES,
+        compute_recent_stats,
+        load_data,
+        preprocess,
+        split_by_date,
+    )
+
+    logger.info("データを読み込み中...")
+    df = compute_recent_stats(preprocess(load_data(DATABASE_URL, venues=JRA_VENUES)))
+    train_df, val_df, test_df = split_by_date(df)
+    models = model.train(train_df, half_life_days=1095.0)
+    calibrated = calibration.calibrate_models(models, val_df)
+    pred = model.predict(calibrated, test_df)
+
+    merged = test_df[
+        ["race_id", "horse_number", "popularity", "odds", "is_win", "is_placed"]
+    ].merge(
+        pred[["race_id", "horse_number", "win_prob", "place_prob"]],
+        on=["race_id", "horse_number"],
+    )
+    merged["odds"] = pd.to_numeric(merged["odds"], errors="coerce")
+    merged["popularity"] = pd.to_numeric(merged["popularity"], errors="coerce")
+    # 全馬の単勝オッズ・人気があるレースに揃える（市場の勝率と同じ母集団で比べるため）
+    complete = merged.groupby("race_id")[["odds", "popularity"]].transform(
+        lambda col: col.notna().all()
+    )
+    merged = merged[complete.all(axis=1)].copy()
+
+    # 三連複の計算に使っている3着内率（win_prob を Plackett-Luce に入れた周辺確率）
+    merged["top3_pl"] = np.nan
+    for _, idx in merged.groupby("race_id").groups.items():
+        p = merged.loc[idx, "win_prob"].to_numpy()
+        merged.loc[idx, "top3_pl"] = trio.top3_marginals(p / p.sum())
+    merged["market_win"] = (1.0 / merged["odds"]) / merged.groupby("race_id")[
+        "odds"
+    ].transform(lambda o: (1.0 / o).sum())
+
+    logger.info(
+        f"評価対象: テスト期間 {merged['race_id'].nunique():,}レース・{len(merged):,}頭"
+    )
+    result = evaluation.calibration_by_popularity(
+        merged,
+        {
+            "勝率（モデル win_prob）": "win_prob",
+            "勝率（市場・単勝オッズ）": "market_win",
+            "3着内（複勝モデル place_prob）": "place_prob",
+            "3着内（win_prob→PL、三連複で使用）": "top3_pl",
+        },
+        n_bootstrap=2000,
+        random_state=42,
+    )
+    with pd.option_context("display.width", 220, "display.max_columns", 20):
+        logger.info("--- 人気帯別の較正（bias = 予測の平均 − 実際の割合） ---")
+        logger.info(result.to_string())
+
+    output_dir = Path(__file__).parent.parent.parent / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / (
+        f"calibration_by_popularity_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    )
+    result.to_csv(path, index=False)
+    logger.info(f"結果を保存しました: {path}")
+
+
 def compare_longshot_mode() -> None:
     """7番人気以下専用モデル（学習行を人気で絞る）とbaselineを比較し、結果をCSVに保存する。"""
     from predictor import longshot_experiment
@@ -833,7 +907,7 @@ def main() -> None:
             "| predict <race_id> | tune [--n-trials N] | compare-half-life "
             "| compare-longshot-training "
             "| compare-venues "
-            "| trio-baseline | trio-ev "
+            "| trio-baseline | trio-ev | calibration-by-popularity "
             "| train-embeddings | similar-embeddings <category> <id> [--top-n N]"
         )
         sys.exit(1)
@@ -879,6 +953,8 @@ def main() -> None:
         trio_baseline_mode()
     elif command == "trio-ev":
         trio_ev_mode()
+    elif command == "calibration-by-popularity":
+        calibration_by_popularity_mode()
     elif command == "train-embeddings":
         train_embeddings_mode()
     elif command == "similar-embeddings":
