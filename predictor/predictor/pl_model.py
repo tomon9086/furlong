@@ -194,8 +194,10 @@ def predict_win_prob(
     booster: lgb.Booster, df: pd.DataFrame, init: np.ndarray | None = None
 ) -> np.ndarray:
     """各行の勝率（レース内 softmax）を返す。init は学習時と同じ初期スコア。"""
-    X, _ = _features(df)
-    scores = booster.predict(X, num_iteration=booster.best_iteration)
+    # 学習時に実際に使った列だけを渡す（予測用の df に余分な列があってもよい）
+    X = df[booster.feature_name()]
+    best = booster.best_iteration if booster.best_iteration > 0 else None
+    scores = booster.predict(X, num_iteration=best)
     if init is not None:
         scores = scores + init
     layout = RaceLayout.from_frame(df)

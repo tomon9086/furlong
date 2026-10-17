@@ -264,13 +264,45 @@ def _mark_recommended(
     return df.drop(columns=["_pop_rank"])
 
 
-def print_prediction(pred_df: pd.DataFrame) -> None:
-    """予測結果を標準出力に表示する。"""
+# オッズなし・オッズありの2パターンの列
+# （dual_prediction.add_dual_probabilities が付ける）
+_DUAL_COLS = ["top3_prob", "win_prob_odds", "top3_prob_odds"]
+# (表示名, 確率の列, オッズありか)
+_TRIO_PATTERNS = (
+    ("オッズなし", "win_prob", False),
+    ("オッズあり", "win_prob_odds", True),
+)
+
+
+def _trio_candidates(
+    group: pd.DataFrame, market_discount: tuple[float, float] | None
+) -> dict[str, list[tuple[list[int], float]]]:
+    """2パターンそれぞれの三連複確率の上位組。2パターンの列が無ければ空。"""
+    from predictor.dual_prediction import top_trios
+
+    if market_discount is None or "win_prob_odds" not in group.columns:
+        return {}
+    result = {}
+    for label, col, use_odds in _TRIO_PATTERNS:
+        lam = market_discount if use_odds else (1.0, 1.0)
+        result[label] = top_trios(group, col, *lam)
+    return result
+
+
+def print_prediction(
+    pred_df: pd.DataFrame, market_discount: tuple[float, float] | None = None
+) -> None:
+    """予測結果を標準出力に表示する。
+
+    ``market_discount`` を渡すと、オッズなし・オッズありの2パターンの
+    三連複上位組も表示する。
+    """
     df = _mark_recommended(pred_df)
     display_cols = [
         "horse_number",
         "win_prob",
         "place_prob",
+        *[c for c in _DUAL_COLS if c in df.columns],
         "predicted_rank",
         "recommended",
     ]
@@ -294,6 +326,18 @@ def print_prediction(pred_df: pd.DataFrame) -> None:
         trifecta_horses = group[group["recommended_trifecta_box"]].sort_values(
             "horse_number"
         )
+
+        candidates = _trio_candidates(group, market_discount)
+        if candidates:
+            logger.info("\n  三連複の確率上位（オッズなし / オッズあり）:")
+            for label, combos in candidates.items():
+                if not combos:
+                    logger.info(f"    {label}: (オッズが無いため計算できません)")
+                    continue
+                text = "  ".join(
+                    f"{'-'.join(str(h) for h in hn)} ({p:.1%})" for hn, p in combos
+                )
+                logger.info(f"    {label}: {text}")
 
         logger.info("\n  推奨買い目:")
         if win_horses.empty:
@@ -374,7 +418,9 @@ def _toml_list(values: list) -> str:
     return "[" + ", ".join(str(v) for v in values) + "]"
 
 
-def _format_betting_toml(pred_df: pd.DataFrame) -> str:
+def _format_betting_toml(
+    pred_df: pd.DataFrame, market_discount: tuple[float, float] | None = None
+) -> str:
     """予測結果と推奨買い目を TOML 文字列として生成する。
 
     tomllib は読み込み専用のため、書き込みは手動フォーマットで行う。
@@ -439,6 +485,21 @@ def _format_betting_toml(pred_df: pd.DataFrame) -> str:
 
         lines.append("")
 
+        candidates = _trio_candidates(group, market_discount)
+        if candidates:
+            # 三連複確率の上位組: オッズなし（モデル単独）と
+            # オッズあり（市場＋着順別ディスカウント）
+            lines.append("[race.trio_candidates]")
+            for key, (label, _, _) in zip(
+                ("no_odds", "with_odds"), _TRIO_PATTERNS, strict=True
+            ):
+                items = ", ".join(
+                    f"{{ horses = {_toml_list(hn)}, prob = {round(p, 6)} }}"
+                    for hn, p in candidates[label]
+                )
+                lines.append(f"{key} = [{items}]")
+            lines.append("")
+
         for strat in STRATEGIES:
             picked = group[group[f"recommended_{strat.name}"]].sort_values(
                 "horse_number"
@@ -481,6 +542,7 @@ def save_output(
     race_name: str | None = None,
     race_number: str | None = None,
     date: str | None = None,
+    market_discount: tuple[float, float] | None = None,
 ) -> None:
     """予測結果を CSV + 買い目 TOML としてディレクトリ配下に保存する。
 
@@ -504,5 +566,5 @@ def save_output(
     logger.info(f"CSV 保存: {csv_path}")
 
     toml_path = run_dir / "betting.toml"
-    toml_path.write_text(_format_betting_toml(df), encoding="utf-8")
+    toml_path.write_text(_format_betting_toml(df, market_discount), encoding="utf-8")
     logger.info(f"TOML 保存: {toml_path}")

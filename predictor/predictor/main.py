@@ -396,9 +396,48 @@ def train_mode(
             else:
                 logger.info("  データなし")
 
+    # オッズなし・オッズありの2パターン出力用（ADR-0036）
+    from predictor import dual_prediction, pl_model
+    from predictor.preprocessing import compute_time_decay_weight
+
+    logger.info("Plackett-Luce（上位3頭）の勝ちモデルを学習中...")
+    pl_weight = (
+        compute_time_decay_weight(
+            train_df["date"], train_df["date"].max(), half_life_days
+        )
+        if half_life_days is not None
+        else None
+    )
+    pl_booster = pl_model.train_pl(train_df, val_df, top_k=3, weight=pl_weight)
+    logger.info(f"  木の本数: {pl_booster.best_iteration}")
+    pl_test = pred_df[["race_id", "horse_number"]].merge(
+        test_df[["race_id", "horse_number"]].assign(
+            pl_win_prob=pl_model.predict_win_prob(pl_booster, test_df)
+        ),
+        on=["race_id", "horse_number"],
+    )
+    pl_metrics = evaluation.evaluate(
+        test_df,
+        pred_df.drop(columns=["win_prob"]).merge(
+            pl_test.rename(columns={"pl_win_prob": "win_prob"}),
+            on=["race_id", "horse_number"],
+        ),
+    )
+    logger.info("--- Plackett-Luce 勝ちモデルの評価（テスト期間） ---")
+    for k in ("win_logloss", "win_accuracy", "win_brier"):
+        logger.info(f"  {k}: {pl_metrics[k]:.4f}（lambdarank: {metrics[k]:.4f}）")
+
+    logger.info("市場の勝率の着順別ディスカウントを推定中（較正期間）...")
+    market_discount = dual_prediction.fit_market_discount(val_df)
+    logger.info(
+        f"  lam2={market_discount[0]:.3f} lam3={market_discount[1]:.3f}"
+    )
+
     logger.info("モデルを保存中...")
     version_dir = model.save_models(models)
     model.save_calibrated_models(calibrated, version_dir)
+    dual_prediction.save_pl_win(pl_booster, version_dir)
+    dual_prediction.save_market_discount(*market_discount, version_dir)
     logger.info(f"完了 ({version_dir.name})")
 
 
@@ -476,13 +515,31 @@ def predict_mode(race_id: str) -> None:
         models = model.load_models()
     pred_df = model.predict(models, target)
 
-    output.print_prediction(pred_df)
+    # オッズなし・オッズありの2パターン（PL 勝ちモデルを含むモデルで学習済みの場合）
+    from predictor import dual_prediction
+
+    dual = dual_prediction.load_dual_models(model.latest_model_dir())
+    if dual is not None:
+        pred_df = dual_prediction.add_dual_probabilities(pred_df, target, *dual)
+        if pred_df["win_prob_odds"].isna().all():
+            logger.warning(
+                "発走前の単勝オッズが無いため、オッズありの確率は出せません"
+            )
+    else:
+        logger.warning(
+            "最新のモデルに Plackett-Luce 勝ちモデルが無いため、"
+            "オッズなし・ありの2パターンは出せません（train を再実行してください）"
+        )
+
+    market_discount = dual[1] if dual is not None else None
+    output.print_prediction(pred_df, market_discount=market_discount)
     output.save_output(
         pred_df,
         race_id,
         race_name=_race_name,
         race_number=_race_number,
         date=_race_date,
+        market_discount=market_discount,
     )
 
 

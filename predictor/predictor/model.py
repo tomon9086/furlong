@@ -215,6 +215,14 @@ def save_calibrated_models(
         pickle.dump(calibrated.place, f)
 
 
+def latest_model_dir(model_dir: Path = _MODEL_DIR) -> Path:
+    """最新のタイムスタンプ付きモデルディレクトリを返す。"""
+    dirs = sorted(d for d in model_dir.iterdir() if d.is_dir())
+    if not dirs:
+        raise FileNotFoundError(f"モデルが見つかりません: {model_dir}")
+    return dirs[-1]
+
+
 def load_models(model_dir: Path = _MODEL_DIR) -> Models:
     """保存済みモデルを読み込む（最新のタイムスタンプディレクトリを使用）。"""
     dirs = sorted(d for d in model_dir.iterdir() if d.is_dir())
