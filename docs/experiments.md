@@ -41,3 +41,4 @@
 | 2026-10-16 | JRA の学習データを4場から10場に拡張（6場の補完後。logloss・的中率は有意に改善、1位馬単勝の回収率は walk-forward で有意に悪化） | Accepted | [ADR-0033](./adr/0033-jra-10-venues-training-data.md) |
 | 2026-10-16 | 三連複確率の補正（着順別ディスカウント・複勝モデルとの整合）。あわせてモデルが市場（単勝オッズ由来）に3着内の予想で大きく負けていると判明 | Rejected | [ADR-0034](./adr/0034-trio-probability-discount-and-place-matching.md) |
 | 2026-10-17 | 勝率の鋭さ（レース単位の温度）調整。人気薄の過大評価は確率の作り方ではなく、市場に有ってモデルに無い情報によると判明 | Rejected | [ADR-0035](./adr/0035-win-probability-sharpening-rejected.md) |
+| 2026-10-17 | オッズなしモデルの勝ちモデルを lambdarank から Plackett-Luce（上位3頭）目的関数に切り替え | Accepted | [ADR-0036](./adr/0036-plackett-luce-top3-objective.md) |
