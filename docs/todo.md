@@ -78,6 +78,9 @@
 - [x] 案C: 上位3頭の Plackett-Luce 尤度を目的関数にした LightGBM（P3）を実装・検定 → 採用（[ADR-0036](./adr/0036-plackett-luce-top3-objective.md)）
 - [x] 運用の勝ちモデルを P3 に切り替え、predict でオッズなし・オッズありの2パターンを出す（2026-10-17）。`train` が PL 勝ちモデルと市場の着順別ディスカウントを保存し、`predict` が `top3_prob`・`win_prob_odds`・`top3_prob_odds` の列と、三連複の確率上位5組（`betting.toml` の `[race.trio_candidates]`）を出す。golem のモデル `20261017_052256` で学習済み
 - [ ] 案Cが頭打ちなら、案D（展開シナリオ）に進むか決める（フェーズ1の残差相関の検定から）
+- [x] モデルが市場にどこで負けているかを調べる（2026-10-19、`gap-analysis`）: 差はほぼ全区切りに均等。キャリアの浅い馬（新馬・初出走・2歳）と人気馬の過小評価で特に大きい（[plan/trio-probability.md](./plan/trio-probability.md) 参照）
+- [ ] 相手の強さを考慮した馬の能力レーティング（Elo / 時系列 Plackett-Luce）を特徴量に追加して検定
+- [ ] 初出走・キャリアの浅い馬向けの特徴量（母の他の産駒の成績、調教師の新馬戦成績など）を追加して検定
 
 ## モンテカルロ着順シミュレーション
 
