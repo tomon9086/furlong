@@ -133,8 +133,12 @@ def make_eval(layout: RaceLayout, top_k: int, name: str):
     return feval
 
 
-def _features(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
-    available = [f for f in get_feature_columns() if f in df.columns]
+def _features(
+    df: pd.DataFrame, extra_features: list[str] | None = None
+) -> tuple[pd.DataFrame, list[str]]:
+    available = [
+        f for f in get_feature_columns(extra_columns=extra_features) if f in df.columns
+    ]
     X = df[available]
     cat_cols = [c for c in X.columns if X[c].dtype.name == "category"]
     return X, cat_cols
@@ -150,13 +154,15 @@ def train_pl(
     num_boost_round: int = 5000,
     early_stopping_rounds: int = 200,
     params: dict | None = None,
+    extra_features: list[str] | None = None,
 ) -> lgb.Booster:
     """Plackett-Luce（上位 top_k 頭）で学習する。木の本数は val の尤度で早期終了。
 
     ``init_train``・``init_val`` は各行の初期スコア（例: 市場の勝率の log）。
+    ``extra_features`` は ``get_feature_columns`` に無い追加の特徴量の列名。
     """
-    X_train, cat_cols = _features(train_df)
-    X_val, _ = _features(val_df)
+    X_train, cat_cols = _features(train_df, extra_features)
+    X_val, _ = _features(val_df, extra_features)
     train_set = lgb.Dataset(
         X_train,
         label=train_df["finishing_position"].to_numpy(dtype=float),
