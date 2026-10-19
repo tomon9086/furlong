@@ -380,7 +380,9 @@ def print_prediction(
             logger.info("\n  三連複の確率上位:")
             for key, label, _ in _TRIO_PATTERNS:
                 entry = candidates[key]
-                logger.info(f"    {label}（{entry['source']}）")
+                # 出どころが表示名と重なる（[モデル]（モデル））ときは省く
+                source = "" if entry["source"] in label else f"（{entry['source']}）"
+                logger.info(f"    {label}{source}")
                 if not entry["combos"]:
                     logger.info("      (オッズが無いため計算できません)")
                     continue
