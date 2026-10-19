@@ -460,6 +460,24 @@ def load_final_odds(
     return pd.DataFrame(rows, columns=cols)
 
 
+def load_latest_odds_payload(database_url: str, race_id: str) -> str | None:
+    """指定レースの最新のオッズ API 応答（odds_snapshots、gzip 展開済み）を返す。
+
+    predict 時のオッズ取得で発走前スナップショットとして保存されたもの。無ければ None。
+    """
+    import gzip
+
+    with psycopg.connect(database_url) as conn:
+        row = conn.execute(
+            "SELECT payload FROM odds_snapshots WHERE race_id = %s "
+            "ORDER BY fetched_at DESC LIMIT 1",
+            (race_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return gzip.decompress(row[0]).decode("utf-8")
+
+
 def load_data(database_url: str, venues: list[str] | None = None) -> pd.DataFrame:
     """PostgreSQL からレース・出走馬データを読み込む（学習用）。
 

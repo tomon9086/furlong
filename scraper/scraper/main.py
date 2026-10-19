@@ -51,7 +51,12 @@ def scrape_race(race_id: str) -> None:
 
 
 def scrape_odds(race_id: str) -> None:
-    """指定レースIDの単勝オッズページをスクレイピングして DB に保存する."""
+    """指定レースIDのオッズを取得して DB に保存する.
+
+    単勝オッズを pre_race_odds に保存し、全券種を含む API の応答を
+    odds_snapshots にも保存する（発走前ならスナップショット、確定後なら
+    final_odds にも展開される）。predict の「オッズあり」の三連複確率はこれを使う。
+    """
     parser = OddsParser()
     db = Database(DATABASE_URL)
 
@@ -61,6 +66,16 @@ def scrape_odds(race_id: str) -> None:
 
     rows = parser.parse(html)
     db.save_pre_race_odds(race_id, rows)
+
+    parsed = AllOddsParser().parse(html)
+    db.save_odds_snapshot(
+        race_id, html, parsed.status, parsed.official_datetime, parsed.rows
+    )
+    logger.info(
+        "レース %s のオッズ（全券種、status=%s）を保存しました。",
+        race_id,
+        parsed.status,
+    )
 
 
 def _fetch_horse_profile(

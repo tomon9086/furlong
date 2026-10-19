@@ -267,26 +267,11 @@ def _mark_recommended(
 # オッズなし・オッズありの2パターンの列
 # （dual_prediction.add_dual_probabilities が付ける）
 _DUAL_COLS = ["top3_prob", "win_prob_odds", "top3_prob_odds"]
-# (表示名, 確率の列, オッズありか)
+# 三連複候補（dual_prediction.trio_candidates の戻り値）のキーと、表示・TOML での名前
 _TRIO_PATTERNS = (
-    ("オッズなし", "win_prob", False),
-    ("オッズあり", "win_prob_odds", True),
+    ("オッズなし", "[モデル]", "no_odds"),
+    ("オッズあり", "[市場]", "with_odds"),
 )
-
-
-def _trio_candidates(
-    group: pd.DataFrame, market_discount: tuple[float, float] | None
-) -> dict[str, list[tuple[list[int], float]]]:
-    """2パターンそれぞれの三連複確率の上位組。2パターンの列が無ければ空。"""
-    from predictor.dual_prediction import top_trios
-
-    if market_discount is None or "win_prob_odds" not in group.columns:
-        return {}
-    result = {}
-    for label, col, use_odds in _TRIO_PATTERNS:
-        lam = market_discount if use_odds else (1.0, 1.0)
-        result[label] = top_trios(group, col, *lam)
-    return result
 
 
 def _display_width(text: str) -> int:
@@ -343,13 +328,14 @@ def _format_dual_table(group: pd.DataFrame) -> str:
 
 def print_prediction(
     pred_df: pd.DataFrame,
-    market_discount: tuple[float, float] | None = None,
+    trio_candidates: dict[str, dict] | None = None,
     race_label: str | None = None,
 ) -> None:
     """予測結果を標準出力に表示する。
 
-    ``market_discount`` を渡すと、オッズなし・オッズありの2パターンの
-    三連複上位組も表示する。``race_label`` は見出しに添えるレース名など。
+    ``trio_candidates`` は {race_id: dual_prediction.trio_candidates の戻り値}。
+    渡すと、オッズなし・オッズありの2パターンの三連複上位組も表示する。
+    ``race_label`` は見出しに添えるレース名など。
     """
     df = _mark_recommended(pred_df)
     display_cols = [
@@ -372,7 +358,7 @@ def print_prediction(
         if all(c in group.columns for c in _DUAL_COLS):
             logger.info(
                 "  [モデル] = オッズなし（特徴量だけの見立て）、"
-                "[市場] = オッズあり（発走前の単勝オッズ＋2・3着の補正）"
+                "[市場] = オッズあり（勝率は単勝オッズ、3着内・三連複は三連複オッズ）"
             )
             logger.info("\n" + _format_dual_table(group))
         else:
@@ -389,16 +375,16 @@ def print_prediction(
             "horse_number"
         )
 
-        candidates = _trio_candidates(group, market_discount)
+        candidates = (trio_candidates or {}).get(race_id)
         if candidates:
             logger.info("\n  三連複の確率上位:")
-            labels = {"オッズなし": "[モデル]", "オッズあり": "[市場]"}
-            for label, combos in candidates.items():
-                logger.info(f"    {labels.get(label, label)}")
-                if not combos:
+            for key, label, _ in _TRIO_PATTERNS:
+                entry = candidates[key]
+                logger.info(f"    {label}（{entry['source']}）")
+                if not entry["combos"]:
                     logger.info("      (オッズが無いため計算できません)")
                     continue
-                for rank, (hn, p) in enumerate(combos, start=1):
+                for rank, (hn, p) in enumerate(entry["combos"], start=1):
                     combo = "-".join(f"{h:>2}" for h in hn)
                     logger.info(f"      {rank}. {combo}  {p:5.1%}")
 
@@ -483,7 +469,7 @@ def _toml_list(values: list) -> str:
 
 def _format_betting_toml(
     pred_df: pd.DataFrame,
-    market_discount: tuple[float, float] | None = None,
+    trio_candidates: dict[str, dict] | None = None,
     model_version: str | None = None,
 ) -> str:
     """予測結果と推奨買い目を TOML 文字列として生成する。
@@ -554,19 +540,20 @@ def _format_betting_toml(
 
         lines.append("")
 
-        candidates = _trio_candidates(group, market_discount)
+        candidates = (trio_candidates or {}).get(race_id)
         if candidates:
-            # 三連複確率の上位組: オッズなし（モデル単独）と
-            # オッズあり（市場＋着順別ディスカウント）
+            # 三連複確率の上位組: オッズなし（モデル単独）とオッズあり（市場）。
+            # *_source は確率の出どころ（モデル / 三連複オッズ / 単勝オッズ+補正）
             lines.append("[race.trio_candidates]")
-            for key, (label, _, _) in zip(
-                ("no_odds", "with_odds"), _TRIO_PATTERNS, strict=True
-            ):
+            for key, _, toml_key in _TRIO_PATTERNS:
+                entry = candidates[key]
                 items = ", ".join(
                     f"{{ horses = {_toml_list(hn)}, prob = {round(p, 6)} }}"
-                    for hn, p in candidates[label]
+                    for hn, p in entry["combos"]
                 )
-                lines.append(f"{key} = [{items}]")
+                lines.append(f"{toml_key} = [{items}]")
+                source = json.dumps(entry["source"], ensure_ascii=False)
+                lines.append(f"{toml_key}_source = {source}")
             lines.append("")
 
         for strat in STRATEGIES:
@@ -611,7 +598,7 @@ def save_output(
     race_name: str | None = None,
     race_number: str | None = None,
     date: str | None = None,
-    market_discount: tuple[float, float] | None = None,
+    trio_candidates: dict[str, dict] | None = None,
     model_version: str | None = None,
 ) -> None:
     """予測結果を CSV + 買い目 TOML としてディレクトリ配下に保存する。
@@ -637,6 +624,6 @@ def save_output(
 
     toml_path = run_dir / "betting.toml"
     toml_path.write_text(
-        _format_betting_toml(df, market_discount, model_version), encoding="utf-8"
+        _format_betting_toml(df, trio_candidates, model_version), encoding="utf-8"
     )
     logger.info(f"TOML 保存: {toml_path}")

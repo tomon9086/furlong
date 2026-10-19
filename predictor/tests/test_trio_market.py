@@ -28,7 +28,7 @@ def _race(race_id: str, positions: list[int], win_odds: list[float]):
 class TestRaceTables:
     def test_builds_table_and_actual_combo(self):
         df, odds = _race("R1", [3, 1, 5, 2, 4], [3.0, 2.0, 9.0, 5.0, 20.0])
-        tables = tm._race_tables(df, odds)
+        tables = tm.race_tables(df, odds)
         assert len(tables) == 1
         t = tables[0]
         assert set(t["combos"][t["actual"]].tolist()) == {0, 1, 3}
@@ -36,12 +36,12 @@ class TestRaceTables:
 
     def test_skips_race_with_missing_trio_odds(self):
         df, odds = _race("R1", [3, 1, 5, 2, 4], [3.0, 2.0, 9.0, 5.0, 20.0])
-        tables = tm._race_tables(df, odds.iloc[1:])
+        tables = tm.race_tables(df, odds.iloc[1:])
         assert tables == []
 
     def test_methods_produce_distributions(self):
         df, odds = _race("R1", [3, 1, 5, 2, 4], [3.0, 2.0, 9.0, 5.0, 20.0])
-        t = tm._race_tables(df, odds)[0]
+        t = tm.race_tables(df, odds)[0]
         for probs in (tm._win_based(t, 0.8, 0.8), tm._trio_based(t, 1.2)):
             assert probs.sum() == pytest.approx(1.0)
             assert len(probs) == 10

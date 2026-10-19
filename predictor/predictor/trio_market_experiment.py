@@ -36,7 +36,7 @@ _OUTPUT_DIR = Path(__file__).parent.parent.parent / "output"
 METHODS = ["A: 単勝+補正", "B: 三連複", "C: 三連複+べき補正"]
 
 
-def _race_tables(df: pd.DataFrame, trio_odds: pd.DataFrame) -> list[dict]:
+def race_tables(df: pd.DataFrame, trio_odds: pd.DataFrame) -> list[dict]:
     """全馬の単勝オッズと全組の三連複オッズがそろい、同着なしのレースをまとめる。"""
     odds_by_race = {
         rid: dict(zip(g["combination"], g["odds"], strict=True))
@@ -102,7 +102,8 @@ def _place_nll(t: dict, probs: np.ndarray) -> float:
     return float(-(placed * np.log(marg) + (1 - placed) * np.log(1 - marg)).mean())
 
 
-def _fit_alpha(tables: list[dict]) -> float:
+def fit_alpha(tables: list[dict]) -> float:
+    """三連複オッズ由来の確率 q**alpha の対数尤度を最大化する alpha を推定する。"""
     def objective(alpha: float) -> float:
         nll = [_nll(_trio_based(t, alpha), t["actual"]) for t in tables]
         return float(np.mean(nll))
@@ -130,7 +131,7 @@ def run(
     parts = {}
     for name, part in (("val", val_df), ("test", test_df)):
         race_ids = part["race_id"].unique().tolist()
-        parts[name] = _race_tables(part, trio_odds_loader(race_ids))
+        parts[name] = race_tables(part, trio_odds_loader(race_ids))
         logger.info(f"{name}: {len(parts[name]):,}レース（全オッズあり・同着なし）")
 
     val = parts["val"]
@@ -138,7 +139,7 @@ def run(
         [t["win_q"] for t in val],
         np.array([t["combos"][t["actual"]] for t in val]),
     )
-    alpha = _fit_alpha(val)
+    alpha = fit_alpha(val)
     logger.info(
         f"較正期間で推定: lam2={lam[0]:.3f} lam3={lam[1]:.3f} / alpha={alpha:.3f}"
     )

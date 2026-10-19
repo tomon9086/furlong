@@ -427,17 +427,27 @@ def train_mode(
     for k in ("win_logloss", "win_accuracy", "win_brier"):
         logger.info(f"  {k}: {pl_metrics[k]:.4f}（lambdarank: {metrics[k]:.4f}）")
 
-    logger.info("市場の勝率の着順別ディスカウントを推定中（較正期間）...")
-    market_discount = dual_prediction.fit_market_discount(val_df)
+    logger.info("「オッズあり」のパラメータを推定中（較正期間）...")
+    from predictor import trio_market_experiment
+    from predictor.preprocessing import load_final_odds
+
+    lam2, lam3 = dual_prediction.fit_market_discount(val_df)
+    val_trio = trio_market_experiment.race_tables(
+        val_df,
+        load_final_odds(DATABASE_URL, val_df["race_id"].unique().tolist(), bet_type=7),
+    )
+    trio_alpha = trio_market_experiment.fit_alpha(val_trio) if val_trio else None
+    market_params = dual_prediction.MarketParams(lam2, lam3, trio_alpha)
     logger.info(
-        f"  lam2={market_discount[0]:.3f} lam3={market_discount[1]:.3f}"
+        f"  lam2={lam2:.3f} lam3={lam3:.3f} / "
+        f"trio_alpha={trio_alpha}（三連複オッズのある {len(val_trio):,}レースで推定）"
     )
 
     logger.info("モデルを保存中...")
     version_dir = model.save_models(models)
     model.save_calibrated_models(calibrated, version_dir)
     dual_prediction.save_pl_win(pl_booster, version_dir)
-    dual_prediction.save_market_discount(*market_discount, version_dir)
+    dual_prediction.save_market_params(market_params, version_dir)
     logger.info(f"完了 ({version_dir.name})")
 
 
@@ -528,11 +538,28 @@ def predict_mode(race_id: str) -> None:
         f" / 較正済み: {'あり' if calibrated else 'なし'}"
         f" / オッズなし・ありの2パターン: {'あり' if dual is not None else 'なし'}"
     )
+    trio_candidates = None
     if dual is not None:
-        pred_df = dual_prediction.add_dual_probabilities(pred_df, target, *dual)
+        from predictor.preprocessing import load_latest_odds_payload
+
+        pl_booster, market_params = dual
+        payload = load_latest_odds_payload(DATABASE_URL, race_id)
+        race_trio = dual_prediction.trio_odds_from_payload(payload) if payload else {}
+        pred_df = dual_prediction.add_dual_probabilities(
+            pred_df, target, pl_booster, market_params, {race_id: race_trio}
+        )
+        trio_candidates = {
+            rid: dual_prediction.trio_candidates(group, market_params, race_trio)
+            for rid, group in pred_df.groupby("race_id")
+        }
         if pred_df["win_prob_odds"].isna().all():
             logger.warning(
                 "発走前の単勝オッズが無いため、オッズありの確率は出せません"
+            )
+        elif trio_candidates[race_id]["オッズあり"]["source"] != "三連複オッズ":
+            logger.warning(
+                "発走前の三連複オッズがそろっていないため、オッズありの3着内・三連複は"
+                "単勝オッズ+補正で代用します"
             )
     else:
         logger.warning(
@@ -540,7 +567,6 @@ def predict_mode(race_id: str) -> None:
             "オッズなし・ありの2パターンは出せません（train を再実行してください）"
         )
 
-    market_discount = dual[1] if dual is not None else None
     race_label = " ".join(
         part
         for part in (
@@ -551,7 +577,7 @@ def predict_mode(race_id: str) -> None:
         if part and part not in ("None", "nan")
     )
     output.print_prediction(
-        pred_df, market_discount=market_discount, race_label=race_label
+        pred_df, trio_candidates=trio_candidates, race_label=race_label
     )
     output.save_output(
         pred_df,
@@ -559,7 +585,7 @@ def predict_mode(race_id: str) -> None:
         race_name=_race_name,
         race_number=_race_number,
         date=_race_date,
-        market_discount=market_discount,
+        trio_candidates=trio_candidates,
         model_version=version_dir.name,
     )
 
