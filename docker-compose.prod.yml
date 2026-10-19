@@ -19,6 +19,9 @@ services:
       - backend
 
   api:
+    # predictor/predictor/api.py が未実装のため、既定では起動しない。
+    # 実装後にこの profiles を削除する（明示的に起動する場合は --profile api を付ける）
+    profiles: ["api"]
     build:
       context: .
       dockerfile: predictor/Dockerfile
