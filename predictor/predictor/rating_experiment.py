@@ -34,7 +34,7 @@ from predictor.sharpness_experiment import _race_groups, _trio_and_place, _win_n
 logger = logging.getLogger(__name__)
 
 _OUTPUT_DIR = Path(__file__).parent.parent.parent / "output"
-LR_CANDIDATES = [0.05, 0.1, 0.2, 0.4]
+LR_CANDIDATES = [0.05, 0.1, 0.2, 0.4, 0.8, 1.6, 3.2]
 
 
 def run(
