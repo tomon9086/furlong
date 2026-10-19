@@ -1,7 +1,7 @@
 """スクレイパースケジューラ
 
 APScheduler を使い、以下の定期バッチを実行する:
-  - 14:00 : scrape_incremental()  — 当月までの差分レース結果を収集
+  - 14:00 : scrape_incremental()  — 当月までの差分レース結果と、その確定オッズを収集
   - 22:00 : scrape_shutuba_upcoming() — 翌日の出馬表を収集
 """
 

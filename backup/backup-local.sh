@@ -40,3 +40,8 @@ else
 fi
 
 echo "Backup saved: $OUTPUT_FILE"
+
+# 新しいバックアップが正常なら、自動バックアップ（${PGDATABASE}_YYYYMMDD_HHMMSS.sql.gz）を
+# 最新 RETENTION_COUNT 件だけ残す。手動の furlong_manual_* や sync.sh の
+# furlong_<host>_* は名前のパターンが違うので消さない。
+"$SCRIPT_DIR/prune.sh" "$OUTPUT_FILE" "${PGDATABASE}_[0-9]*.sql.gz" "${RETENTION_COUNT:-3}"

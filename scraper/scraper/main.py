@@ -332,6 +332,9 @@ def scrape_backfill(
 def scrape_incremental(start_date: date | None = None) -> None:
     """最終取得日の翌月から今月までの全レースを差分スクレイピングする.
 
+    最後に、その期間の JRA レースのうち確定オッズが未取得のものを取得する
+    （``scrape_odds_backfill``）。
+
     Args:
         start_date: スクレイピング開始月を指定する場合に渡す (手動実行用)。
                     省略時は DB の最新レース日付の月を開始月とする。
@@ -367,6 +370,11 @@ def scrape_incremental(start_date: date | None = None) -> None:
             year, month = year + 1, 1
         else:
             month += 1
+
+    # 確定オッズ（全券種）も毎回取る。取得済み・取得不可のレースは飛ばすので、
+    # 今回保存したレースに加え、過去の取得漏れも自動で埋まる。
+    logger.info("=== 確定オッズ（%d〜%d年の未取得分） ===", start_year, today.year)
+    scrape_odds_backfill(start_year, today.year)
 
 
 def scrape_regional_backfill(

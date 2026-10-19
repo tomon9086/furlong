@@ -103,6 +103,9 @@ echo "==> Dumping '$REMOTE_DB' from '$HOST' (container: $REMOTE_CONTAINER)..."
 ssh "$HOST" "docker exec ${REMOTE_CONTAINER} pg_dump -U ${REMOTE_USER} --clean --if-exists ${REMOTE_DB}" | gzip > "$OUTPUT_FILE"
 echo "==> Saved: $OUTPUT_FILE"
 
+# 新しいダンプが正常なら、同じホストからのダンプを最新 RETENTION_COUNT 件だけ残す
+"$(dirname "${BASH_SOURCE[0]}")/prune.sh" "$OUTPUT_FILE" "${REMOTE_DB}_${HOST}_[0-9]*.sql.gz" "${RETENTION_COUNT:-3}"
+
 if [ "$RESTORE" != true ]; then
   exit 0
 fi

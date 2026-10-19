@@ -115,6 +115,19 @@ docker compose -f docker-compose.prod.yml run --rm backup /backup.sh
 バックアップファイルは `./backup/data/` ディレクトリに `furlong_YYYYMMDD_HHMMSS.sql.gz` の形式で保存される（gitignore 対象）。
 本番の定期実行は毎日深夜3:00（crond による自動実行）。Claude Code からは `db-backup` skill でも実行できる。
 
+`backup-local.sh` と `sync.sh` は、新しいバックアップが正常に取れたとき（gzip として壊れておらず 1MB 以上）だけ、
+同じ種類の古いバックアップを消して最新3件を残す（`backup/prune.sh`）。対象は `backup-local.sh` なら
+`furlong_YYYYMMDD_HHMMSS.sql.gz`、`sync.sh` なら `furlong_<host>_YYYYMMDD_HHMMSS.sql.gz` で、
+手動で取った `furlong_manual_*` は消さない。残す件数は `RETENTION_COUNT` で変えられる。
+
+```bash
+# 最新5件を残す
+RETENTION_COUNT=5 ./backup/backup-local.sh
+
+# 何が消えるかだけ確認する（<新しいバックアップ> は直近に取ったファイル）
+backup/prune.sh backup/data/<新しいバックアップ> "furlong_[0-9]*.sql.gz" 3 --dry-run
+```
+
 ### DB 同期（リモートホスト → ローカル）
 
 任意のリモートホスト（SSH でログイン可能な Postgres コンテナ稼働ホスト）から直接 `pg_dump` して
