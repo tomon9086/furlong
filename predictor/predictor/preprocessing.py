@@ -329,7 +329,7 @@ WHERE race_id = ANY(%s)
 _FINAL_ODDS_QUERY = """
 SELECT race_id, combination, odds::float AS odds
 FROM final_odds
-WHERE race_id = ANY(%s) AND bet_type = %s
+WHERE race_id = ANY(%s) AND bet_type = %s AND odds > 0
 """
 
 _GLOBAL_PLACE_RATE_QUERY = """

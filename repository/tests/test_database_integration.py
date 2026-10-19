@@ -194,6 +194,7 @@ class TestSaveOddsSnapshot:
     _ROWS: list[OddsRow] = [
         _odds_row("1", "12", "4.0"),
         _odds_row("1", "05", "---", popularity=""),
+        _odds_row("1", "07", "0.0", popularity="9999"),
         _odds_row("5", "0712", "3.2", odds_max="3.7"),
         _odds_row("7", "030712", "11.3"),
         _odds_row("8", "030712", "53.9"),
@@ -202,7 +203,8 @@ class TestSaveOddsSnapshot:
     def test_saves_payload_and_final_odds(self, db: Database, db_url: str) -> None:
         """応答を gzip で保存し、final_odds に展開する。
 
-        三連単と数値化できない行（取消馬の "---"）は final_odds に入れない。
+        三連単と数値化できない行（"---"）、発売されなかった組（0.0倍）は
+        final_odds に入れない。
         """
         payload = '{"status": "result"}'
         n = db.save_odds_snapshot(

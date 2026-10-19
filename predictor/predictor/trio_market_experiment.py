@@ -59,7 +59,8 @@ def _race_tables(df: pd.DataFrame, trio_odds: pd.DataFrame) -> list[dict]:
             "".join(f"{h:02d}" for h in sorted(horse_numbers[c])) for c in combos
         ]
         trio_values = np.array([race_odds.get(k, np.nan) for k in keys])
-        if np.isnan(trio_values).any():
+        # 0倍（発売されなかった組）も欠けとして扱う
+        if np.isnan(trio_values).any() or (trio_values <= 0).any():
             continue
         top3 = set(np.argsort(positions, kind="stable")[:3].tolist())
         actual = next(i for i, c in enumerate(combos) if set(c.tolist()) == top3)

@@ -485,7 +485,8 @@ class Database:
                 if bet_type not in _FINAL_ODDS_BET_TYPES:
                     continue
                 odds = _parse_float(row.get("オッズ"))
-                if odds is None:
+                # 出走取消などで発売されなかった組は「0.0倍・人気9999」で返る
+                if odds is None or odds <= 0:
                     continue
                 odds_max = (
                     _parse_float(row.get("オッズ上限"))
