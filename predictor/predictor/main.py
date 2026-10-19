@@ -945,6 +945,23 @@ def compare_rating_mode() -> None:
         logger.info(f"結果を保存しました: {path}")
 
 
+def compare_debut_mode() -> None:
+    """初出走・キャリアの浅い馬向けの特徴量を足す効果を検定し、結果を CSV に保存する。"""
+    import pandas as pd
+
+    from predictor import debut_experiment
+    from predictor.preprocessing import JRA_VENUES, load_data, preprocess
+
+    logger.info("データを読み込み中...")
+    df = preprocess(load_data(DATABASE_URL, venues=JRA_VENUES))
+    results = debut_experiment.run(df)
+    with pd.option_context("display.width", 220, "display.max_columns", 20):
+        logger.info("--- P3 vs P3+初出走向け（差が負なら改善） ---")
+        logger.info(results["summary"].to_string())
+    for path in debut_experiment.save_results(results):
+        logger.info(f"結果を保存しました: {path}")
+
+
 def compare_longshot_mode() -> None:
     """7番人気以下専用モデル（学習行を人気で絞る）とbaselineを比較し、結果をCSVに保存する。"""
     from predictor import longshot_experiment
@@ -1134,7 +1151,7 @@ def main() -> None:
             "| compare-venues "
             "| trio-baseline | trio-ev | calibration-by-popularity "
             "| compare-sharpness | compare-market-residual [--walkforward] "
-            "| trio-market | gap-analysis | compare-rating "
+            "| trio-market | gap-analysis | compare-rating | compare-debut "
             "| train-embeddings | similar-embeddings <category> <id> [--top-n N]"
         )
         sys.exit(1)
@@ -1192,6 +1209,8 @@ def main() -> None:
         gap_analysis_mode()
     elif command == "compare-rating":
         compare_rating_mode()
+    elif command == "compare-debut":
+        compare_debut_mode()
     elif command == "train-embeddings":
         train_embeddings_mode()
     elif command == "similar-embeddings":
