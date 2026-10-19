@@ -903,6 +903,29 @@ def trio_market_mode() -> None:
         logger.info(f"結果を保存しました: {path}")
 
 
+def gap_analysis_mode() -> None:
+    """モデルが市場にどこで負けているかを区切り別に調べ、結果を CSV に保存する。"""
+    import pandas as pd
+
+    from predictor import gap_analysis_experiment
+    from predictor.preprocessing import JRA_VENUES, load_data, preprocess
+
+    logger.info("データを読み込み中...")
+    df = preprocess(load_data(DATABASE_URL, venues=JRA_VENUES))
+    results = gap_analysis_experiment.run(df)
+    with pd.option_context(
+        "display.width", 220, "display.max_columns", 20, "display.max_rows", 200
+    ):
+        logger.info("--- 全体（モデル − 市場が正ならモデルが負けている） ---")
+        logger.info(results["overall"].to_string())
+        logger.info("--- レース単位（勝率の対数尤度） ---")
+        logger.info(results["by_race"].to_string())
+        logger.info("--- 馬単位（3着内率の logloss） ---")
+        logger.info(results["by_horse"].to_string())
+    for path in gap_analysis_experiment.save_results(results):
+        logger.info(f"結果を保存しました: {path}")
+
+
 def compare_longshot_mode() -> None:
     """7番人気以下専用モデル（学習行を人気で絞る）とbaselineを比較し、結果をCSVに保存する。"""
     from predictor import longshot_experiment
@@ -1092,7 +1115,7 @@ def main() -> None:
             "| compare-venues "
             "| trio-baseline | trio-ev | calibration-by-popularity "
             "| compare-sharpness | compare-market-residual [--walkforward] "
-            "| trio-market "
+            "| trio-market | gap-analysis "
             "| train-embeddings | similar-embeddings <category> <id> [--top-n N]"
         )
         sys.exit(1)
@@ -1146,6 +1169,8 @@ def main() -> None:
         compare_market_residual_mode()
     elif command == "trio-market":
         trio_market_mode()
+    elif command == "gap-analysis":
+        gap_analysis_mode()
     elif command == "train-embeddings":
         train_embeddings_mode()
     elif command == "similar-embeddings":
