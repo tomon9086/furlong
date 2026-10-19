@@ -49,7 +49,8 @@ def _prior_daily_cumsum(
 def add_debut_features(df: pd.DataFrame) -> pd.DataFrame:
     """初出走向けの特徴量を付けた df を返す。
 
-    df は1頭1レースで、race_id・horse_id・dam・sire・trainer_id・date・is_placed を含む。
+    df は1頭1レースで、race_id・horse_id・dam・sire・trainer_id・date・
+    is_placed を含む。
     """
     data = df.copy()
     placed = data["is_placed"].astype(float)
